@@ -1,0 +1,58 @@
+package org.jeecg.modules.app.bean.vo.ruins;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.experimental.Accessors;
+import org.jeecg.modules.app.bean.vo.fields.ElementTagVO;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.List;
+
+@Data
+@Accessors(chain = true)
+@EqualsAndHashCode(callSuper = false)
+@Schema(description = "殷墟列表对象")
+public class ItemRuinsListVO implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    @Schema(description = "初始ID")
+    private String oriId;
+
+    @Schema(description = "物品ID")
+    private String itemId;
+
+    @Schema(description = "用户ID")
+    private String userId;
+
+    @Schema(description = "分类ID")
+    private String category;
+
+    @Schema(description = "图标")
+    private String icon;
+
+    @Schema(description = "物品名称")
+    private String name;
+
+    @Schema(description = "数量")
+    private Integer quantity;
+
+    @Schema(description = "等级")
+    private Integer level;
+
+    @Schema(description = "价格")
+    private Double price;
+
+    @Schema(description = "物品描述")
+    private String description;
+
+    @Schema(description = "标签组")
+    private List<ElementTagVO> tags;
+
+    @Schema(description = "状态")
+    private Integer status;
+
+}
