@@ -48,10 +48,8 @@ public class AppMediaController {
             if (oConvertUtils.isEmpty(url)) {
                 throw new JeecgBootException("上传文件失败! ");
             }
-            // 返回阿里云原生域名前缀URL
-            String urlOss = OssBootUtil.getOriginalUrl(url);
             Map<String, Object> map = new HashMap<>();
-            map.put("url", urlOss);
+            map.put("url", url);
             map.put("id", IdUtil.getSnowflakeNextIdStr());
             return Result.OK(map);
         } catch (Exception ex) {

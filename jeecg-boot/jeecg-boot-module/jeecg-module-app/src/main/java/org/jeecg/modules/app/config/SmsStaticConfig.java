@@ -13,10 +13,10 @@ import org.springframework.stereotype.Component;
 @Data
 public class SmsStaticConfig {
 
-    @Value("${jeecg.sms.accessKey:}")
+    @Value("${jeecg.oss.accessKey:}")
     private String accessKeyId;
 
-    @Value("${jeecg.sms.secretKey:}")
+    @Value("${jeecg.oss.secretKey:}")
     private String accessKeySecret;
 
 }
