@@ -1,4 +1,4 @@
-package org.jeecg.modules.app.controller.settings;
+package org.jeecg.modules.app.controller.user;
 
 import cn.hutool.core.util.ObjectUtil;
 import io.swagger.v3.oas.annotations.Operation;

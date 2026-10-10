@@ -1,4 +1,4 @@
-package org.jeecg.modules.app.controller.inventory;
+package org.jeecg.modules.app.controller.items;
 
 import cn.hutool.core.util.ObjectUtil;
 import io.swagger.v3.oas.annotations.Operation;

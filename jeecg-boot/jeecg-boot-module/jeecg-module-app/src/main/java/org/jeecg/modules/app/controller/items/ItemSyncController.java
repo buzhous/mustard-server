@@ -1,4 +1,4 @@
-package org.jeecg.modules.app.controller.queue;
+package org.jeecg.modules.app.controller.items;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjectUtil;

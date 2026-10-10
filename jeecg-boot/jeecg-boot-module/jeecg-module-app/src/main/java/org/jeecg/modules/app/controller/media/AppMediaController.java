@@ -1,4 +1,4 @@
-package org.jeecg.modules.app.controller.fields;
+package org.jeecg.modules.app.controller.media;
 
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.ObjectUtil;
