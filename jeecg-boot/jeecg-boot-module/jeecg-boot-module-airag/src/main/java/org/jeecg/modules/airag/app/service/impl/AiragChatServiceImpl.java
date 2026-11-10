@@ -26,7 +26,6 @@ import org.jeecg.common.system.api.ISysBaseAPI;
 import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.util.*;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
-import org.jeecg.common.util.oss.OssBootUtil;
 import org.jeecg.config.AiChatConfig;
 import org.jeecg.config.AiRagConfigBean;
 import org.jeecg.config.JeecgBaseConfig;
@@ -419,6 +418,12 @@ public class AiragChatServiceImpl implements IAiragChatService {
                     files.addAll(currMsg.getFiles());
                     cacheMsg.setFiles(files);
                 }
+				if (currMsg.getOutputValues() != null) {
+					cacheMsg.setOutputValues(currMsg.getOutputValues());
+				}
+				if (currMsg.getOutputTypes() != null) {
+					cacheMsg.setOutputTypes(currMsg.getOutputTypes());
+				}
             } else {
                 currContent = obj.toString();
             }
@@ -1030,6 +1035,19 @@ public class AiragChatServiceImpl implements IAiragChatService {
     }
 
     /**
+     * 将流程最终输出保存到刚追加的AI消息中
+     */
+    private void setFlowResult(ChatConversation chatConversation, EventFlowData data) {
+        List<MessageHistory> histories = chatConversation.getMessages();
+        if (oConvertUtils.isObjectEmpty(histories)) {
+            return;
+        }
+        MessageHistory historyMessage = histories.get(histories.size() - 1);
+        historyMessage.setOutputValues(data.getOutputValues());
+        historyMessage.setOutputTypes(data.getOutputTypes());
+    }
+
+    /**
      * 发送聊天消息
      *
      * @param chatConversation
@@ -1255,6 +1273,7 @@ public class AiragChatServiceImpl implements IAiragChatService {
                         msgEventData.setRequestId(requestId);
                         sendMessage2Client(emitter, msgEventData);
                         appendMessage(messages, aiMessage, chatConversation, topicId);
+                        setFlowResult(chatConversation, data);
                         // 保存会话
                         //update-begin---author:wangshuai---date:2025-12-10---for:【QQYUN-14127】【AI】AI应用门户---
                         saveChatConversation(chatConversation, false, httpRequest, sendParams.getSessionType());
@@ -1376,7 +1395,10 @@ public class AiragChatServiceImpl implements IAiragChatService {
         
         //流程不为空，构建插件（携带应用上下文参数，供变量/记忆节点使用）
         if(oConvertUtils.isNotEmpty(flowId)){
-            Map<String, Object> result = airagFlowPluginService.getFlowsToPlugin(flowId, aiApp.getId(), memoryId);
+            // update-begin--author:wangshuai---date:20261012---for：【issues/9872】智能体中，涉及图片输入的流程无法关联对话中上传的图片
+            // 把当前消息上传的图片带给关联流程，流程开始节点的 images 入参由服务端注入（例如「示例_OCR」流程）
+            Map<String, Object> result = airagFlowPluginService.getFlowsToPlugin(flowId, aiApp.getId(), memoryId, sendParams.getImages());
+            // update-end--author:wangshuai---date:20261012---for：【issues/9872】智能体中，涉及图片输入的流程无法关联对话中上传的图片
             this.addPluginToParams(aiChatParams, result);
         }
 
@@ -1633,7 +1655,9 @@ public class AiragChatServiceImpl implements IAiragChatService {
             }
         }
         final boolean finalShowToolProcess = showToolProcess;
+        //update-begin---author:wangshuai ---date:20260827  for：【LHZP-1614】【AI】工具调用名称翻译为流程名-----------
         final Map<String, String> toolDisplayNames = finalShowToolProcess ? getFlowToolDisplayNames(chatConversation.getApp()) : Collections.emptyMap();
+        //update-end---author:wangshuai ---date:20260827  for：【LHZP-1614】【AI】工具调用名称翻译为流程名-----------
 
         //update-begin---author:wangshuai ---date:20260804  for：【LHZP-1591】智普模型单轮只调用变量工具时兜底写入记忆库-----------
         Set<String> executedToolNames = ConcurrentHashMap.newKeySet();
@@ -2546,46 +2570,14 @@ public class AiragChatServiceImpl implements IAiragChatService {
      */
     private void checkAnonymousFileRef(String fileRef) {
         String airag = "airag/";
-        String relativePath = extractStorageRelativePath(fileRef);
+        //update-begin---author:scott ---date:20261027  for：【GHSA-hw5p-65q6-qcxr】存储地址识别逻辑下沉到 CommonUtils.extractStorageRelativePath（按主机名+端口精确比对），删除本类私有方法-----------
+        String relativePath = CommonUtils.extractStorageRelativePath(fileRef);
+        //update-end---author:scott ---date:20261027  for：【GHSA-hw5p-65q6-qcxr】存储地址识别逻辑下沉到 CommonUtils.extractStorageRelativePath（按主机名+端口精确比对），删除本类私有方法-----------
         if (relativePath == null || !relativePath.startsWith(airag)) {
             log.warn("匿名请求文件路径不在允许范围内: {}", fileRef);
             throw new JeecgBootException("匿名聊天不支持远程文件引用，请直接上传文件");
         }
     }
 
-    /**
-     * 从完整URL中提取存储服务的相对路径，非已配置存储的URL返回null
-     */
-    private String extractStorageRelativePath(String url) {
-        if (oConvertUtils.isEmpty(url)) {
-            return null;
-        }
-        // 匹配 OSS staticDomain（如 https://jeecgdev.oss-cn-beijing.aliyuncs.com）
-        String ossDomain = OssBootUtil.getStaticDomain();
-        if (oConvertUtils.isNotEmpty(ossDomain) && url.toLowerCase().startsWith(ossDomain.toLowerCase())) {
-            String path = url.substring(ossDomain.length());
-            return path.startsWith("/") ? path.substring(1) : path;
-        }
-        // 匹配 OSS endpoint（如 oss-cn-beijing.aliyuncs.com）
-        String ossEndpoint = OssBootUtil.getEndPoint();
-        if (oConvertUtils.isNotEmpty(ossEndpoint) && url.toLowerCase().contains(ossEndpoint.toLowerCase())) {
-            int idx = url.indexOf(ossEndpoint);
-            String afterEndpoint = url.substring(idx + ossEndpoint.length());
-            int slashIdx = afterEndpoint.indexOf('/');
-            return slashIdx >= 0 ? afterEndpoint.substring(slashIdx + 1) : null;
-        }
-        // 匹配 MinIO URL（如 http://192.168.1.100:9000/）
-        String minioUrl = MinioUtil.getMinioUrl();
-        if (oConvertUtils.isNotEmpty(minioUrl) && url.toLowerCase().startsWith(minioUrl.toLowerCase())) {
-            String path = url.substring(minioUrl.length());
-            if (path.startsWith("/")) {
-                path = path.substring(1);
-            }
-            // 跳过 bucket 名称
-            int slashIdx = path.indexOf('/');
-            return slashIdx >= 0 ? path.substring(slashIdx + 1) : null;
-        }
-        return null;
-    }
     //update-end---author:wangshuai ---date:2026-06-16  for：【issues/9672】匿名请求文件引用安全校验-----------
 }

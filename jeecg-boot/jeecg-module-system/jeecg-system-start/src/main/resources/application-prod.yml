@@ -222,15 +222,26 @@ jeecg:
       voice: tongtong
       speed: 1.0
       volume: 0.0
-    # AI视频
+    # AI视频：支持 智普(ZHIPU) 和 MiniMax(MINIMAX)，二选一。切换时启用对应一段、注释另一段
+    # ===== 智普 ZHIPU（当前启用）=====
     ai-model-video:
       provider: ZHIPU
+      # 智普可选模型：cogvideox-3、cogvideox-2、viduq1-text、vidu2-reference
       model: ??
       apiKey: sk-??
-      apiHost: https://api.deepseek.com/v1
+      apiHost: https://open.bigmodel.cn/api/paas/v4
       timeout: 60
       ffmpeg-path:
       edge-tts-path:
+    # ===== MiniMax MINIMAX（备用，启用时取消下面注释并注释掉上面智普那段）=====
+    #ai-model-video:
+    #  provider: MINIMAX
+    #  model: MiniMax-H3
+    #  apiKey: 填写MiniMax的apiKey
+    #  apiHost: https://api.minimax.cn
+    #  timeout: 60
+    #  ffmpeg-path:
+    #  edge-tts-path:
     # 默认向量模型
     ai-model-embed:
       provider: QWEN
@@ -241,7 +252,7 @@ jeecg:
   # AIRag向量库
   ai-rag:
     # AI流程敏感节点(stdio=命令行节点, sql=SQL节点, code=代码节点/脚本执行,高危存在RCE风险默认禁用)
-    allow-sensitive-nodes: sql,stdio,code
+    allow-sensitive-nodes: sql,code
     embed-store:
       host: 127.0.0.1
       port: 5432
@@ -268,10 +279,20 @@ jeecg:
     is-concurrent: true
     # 是否开启三级等保强密码校验（true 开启强密码模式，false 使用简单密码规则）
     enableStrongPwd: false
+    # 是否允许访问本地网络地址（内网）：默认 true 允许，兼容内网 MinIO/文件服务；设为 false 后，按URL下载文件（网络图片上传、AI附件、知识库网页抓取等）禁止访问内网地址，白名单除外。本机其他端口、云元数据地址始终拦截
+    # 集成积木报表时，设为 false 后积木的 API 数据集、API 字典等出站请求同样拦截内网地址，白名单与积木 localAddressWhiteList 合并生效
+    allowLocalAddress: true
+    # 白名单：写了就放行，与开关无关（云元数据、0.0.0.0 除外）；支持 IP、CIDR 网段、域名、地址:端口（推荐，只放行该端口，如微服务网关 localhost:9999）；公网地址无需配置
+    #localAddressWhiteList:
+    #  - 192.168.1.100
+    #  - 10.0.1.0/24
+    #  - localhost:9999
   # 签名密钥串(前后端要一致，正式发布请自行修改)
   signatureSecret: dd05f1c54d63749eda95f9fa6d49v442a
   #签名拦截接口
   signUrls: /sys/dict/getDictItems/*,/sys/dict/loadDict/*,/sys/dict/loadDictOrderByValue/*,/sys/dict/loadDictItem/*,/sys/dict/loadTreeData,/sys/api/queryTableDictItemsByCode,/sys/api/queryFilterTableDictInfo,/sys/api/queryTableDictByKeys,/sys/api/translateDictFromTable,/sys/api/translateDictFromTableByKeys,/sys/sendChangePwdSms,/sys/user/sendChangePhoneSms,/sys/sms,/desform/api/sendVerifyCode
+  # LibreOffice安装目录，非默认安装路径时按实际路径配置
+  libre-office-home:
   # 上传类型：local（本地存储）| minio（MinIO对象存储）| alioss（阿里云OSS）
   uploadType: alioss
   # 前端访问地址

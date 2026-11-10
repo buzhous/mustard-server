@@ -4,7 +4,7 @@
 	<parent>
 		<groupId>org.jeecgframework.boot3</groupId>
 		<artifactId>jeecg-boot-parent</artifactId>
-		<version>3.9.5</version>
+		<version>3.9.6</version>
 	</parent>
 	<modelVersion>4.0.0</modelVersion>
 	<artifactId>jeecg-boot-base-core</artifactId>
@@ -361,11 +361,6 @@
 		<dependency>
 			<groupId>cn.hutool</groupId>
 			<artifactId>hutool-crypto</artifactId>
-		</dependency>
-		<!-- chatgpt -->
-		<dependency>
-			<groupId>org.jeecgframework.boot3</groupId>
-			<artifactId>jeecg-boot-starter-ai</artifactId>
 		</dependency>
         <!-- 腾讯云 -->
         <dependency>

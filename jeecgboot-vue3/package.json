@@ -1,6 +1,6 @@
 {
   "name": "jeecgboot-vue3",
-  "version": "3.9.5",
+  "version": "3.9.6",
   "author": {
     "name": "北京国炬信息技术有限公司",
     "email": "jeecgos@163.com",
@@ -23,7 +23,7 @@
     "husky:install": "husky install"
   },
   "dependencies": {
-    "@jeecg/aiflow": "3.9.5-beta",
+    "@jeecg/aiflow": "3.9.6-beta",
     "@iconify/iconify": "^3.1.1",
     "@ant-design/colors": "^7.2.1",
     "@ant-design/icons-vue": "^7.0.1",
@@ -118,6 +118,7 @@
     "@vue/compiler-sfc": "^3.5.39",
     "@vue/test-utils": "^2.4.11",
     "autoprefixer": "^10.5.2",
+    "clean-css": "^5.3.3",
     "commitizen": "^4.3.2",
     "conventional-changelog-cli": "^4.1.0",
     "cross-env": "^7.0.3",
