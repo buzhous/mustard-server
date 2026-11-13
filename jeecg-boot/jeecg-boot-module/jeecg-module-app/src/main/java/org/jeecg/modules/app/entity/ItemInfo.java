@@ -85,5 +85,10 @@ public class ItemInfo implements Serializable {
     @Schema(description = "用户Id")
     private String userId;
 
+    @Schema(description = "仓位Id(虚拟仓Id或真实站点Id),未传时服务端自动落默认仓")
+    private String stationId;
+
+    @Schema(description = "仓位类型:1虚拟仓,2真实站点仓")
+    private Integer stationType;
 
 }

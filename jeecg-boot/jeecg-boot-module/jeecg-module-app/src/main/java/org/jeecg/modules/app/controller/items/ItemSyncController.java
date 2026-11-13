@@ -104,7 +104,6 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
     @Operation(summary = "同步上传")
     @PostMapping("/upload")
     public Result<ItemSyncRspVO> syncUpload(@RequestBody ItemSyncReqVO syncReqVO) {
-        System.out.println(JSON.toJSONString(syncReqVO));
         AppUser loginUser = AppAuthUtil.getUserInfo();
         if (ObjectUtil.isEmpty(loginUser)) {
             return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());

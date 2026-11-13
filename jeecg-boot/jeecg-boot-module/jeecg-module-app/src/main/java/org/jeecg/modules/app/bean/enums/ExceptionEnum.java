@@ -36,6 +36,12 @@ public enum ExceptionEnum {
     GIFT_INSUFFICIENT_QUANTITY(10606, "赠送剩余数量不足"),
     GIFT_ALREADY_CANCELLED(10607, "赠送已撤回"),
     GIFT_ALREADY_RECEIVED(10608, "赠送已领完"),
+    // 仓储站点 10700-10800
+    STATION_NOT_EXIST(10700, "仓储站点不存在"),
+    STATION_NOT_AVAILABLE(10701, "仓储站点未开放"),
+    STATION_ALREADY_BOUND(10702, "已绑定该仓储站点"),
+    STATION_BIND_LIMIT_EXCEEDED(10703, "已达到仓储站点绑定上限"),
+    STATION_NOT_BOUND(10704, "未绑定该仓储站点"),
     // 优惠券 10500-10600
     COUPON_NOT_EXIST(10500, "优惠券不存在"),
     COUPON_ALREADY_PUBLISHED(10501, "优惠券已发布"),

@@ -1,7 +1,9 @@
 package org.jeecg.modules.app.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoCreateVO;
+import org.jeecg.modules.app.bean.vo.item.ItemInfoQueryVO;
 import org.jeecg.modules.app.entity.ItemInfo;
 
 
@@ -41,5 +43,13 @@ public interface IItemInfoService extends IService<ItemInfo> {
     boolean createItemInfoTmp(ItemInfoCreateVO itemInfoCreateVO);
 
     boolean updateItemInfo(ItemInfoCreateVO createVO);
+
+    /**
+     * 条件分页查询物品（关键字/仓位/状态/排序，供 App 端与开放平台共用）
+     *
+     * @param queryVO 查询条件
+     * @return 分页结果
+     */
+    Page<ItemInfo> listByCondition(ItemInfoQueryVO queryVO);
 
 }

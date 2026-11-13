@@ -2,7 +2,6 @@ package org.jeecg.modules.app.utils;
 
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.NumberUtil;
-import cn.hutool.core.util.RandomUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.jwt.JWT;
 import cn.hutool.jwt.JWTUtil;
@@ -35,10 +34,6 @@ public class SecurityTokenUtil {
 
     public static String createJwtToken(Map<String, Object> map) {
         // 一年有效期
-        //long expireTime = System.currentTimeMillis() + 1000L * 60 * 60 * 24 * 30 * 12;
-        // map.put("uid", "c381c1afb");
-        // map.put("imei", "c381c1afb");
-        //map.put("expire_time", expireTime);
         return JWTUtil.createToken(map, JWT_SECRET.getBytes());
     }
 
@@ -46,8 +41,6 @@ public class SecurityTokenUtil {
         try {
             JWT jwt = JWTUtil.parseToken(token);
             // ================================================================================
-
-            System.out.println(jwt.getPayload().getClaim(AuthConstant.JWT_UID_HEADER));
 
             if (jwt.getPayload().getClaim(AuthConstant.JWT_UID_HEADER) == null
                     || jwt.getPayload().getClaim("imei") == null
@@ -80,17 +73,6 @@ public class SecurityTokenUtil {
     }
 
     public static void main(String[] args) {
-
-//        Map<String, Object> map = new HashMap<>();
-//        String userId = "b1535c168135c0a7f19";
-//        map.put("uid", userId);
-//        map.put("imei", "5c381c1afb1535c168135c0a7");
-//        String token = LoginUtil.createJwtToken(map);
-//        Object jwt = LoginUtil.parseJwtToken(token);
-//        System.out.println(jwt);
-
-        String number = RandomUtil.randomNumbers(6);
-        System.out.println(number);
 
     }
 

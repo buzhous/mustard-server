@@ -18,8 +18,12 @@ import org.jeecg.modules.app.mapper.ItemRuinsMapper;
 import org.jeecg.modules.app.service.IItemRuinsService;
 import org.jeecg.modules.app.service.IItemSyncService;
 import org.jeecg.modules.app.service.IUserCouponService;
+import org.jeecg.modules.app.utils.FieldElementUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 
 @Service
@@ -39,9 +43,12 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
         queryWrapper.lambda().eq(ItemRuins::getStatus, RuinsStatusEnum.NOT_PICKUP.getCode());
         Page<ItemRuins> page1 = new Page<>(page, size);
         IPage<ItemRuins> ruinsPage = this.baseMapper.selectPage(page1, queryWrapper);
-        // 转换分页数据到IPage<ItemRuinsListVO>
+        // 转换分页数据到IPage<ItemRuinsListVO>（tags为JSON字符串，需通过FieldElementUtil解析为List）
         IPage<ItemRuinsListVO> iPageVO = new Page<>(ruinsPage.getCurrent(), ruinsPage.getSize(), ruinsPage.getTotal());
-        iPageVO.setRecords(BeanUtil.copyToList(ruinsPage.getRecords(), ItemRuinsListVO.class));
+        List<ItemRuinsListVO> voList = ruinsPage.getRecords().stream()
+                .map(r -> FieldElementUtil.convertObject(r, new ItemRuinsListVO()))
+                .collect(Collectors.toList());
+        iPageVO.setRecords(voList);
         return iPageVO;
     }
 

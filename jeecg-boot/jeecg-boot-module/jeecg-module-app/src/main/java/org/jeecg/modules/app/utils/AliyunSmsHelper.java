@@ -162,23 +162,18 @@ public class AliyunSmsHelper {
             com.aliyun.teautil.models.RuntimeOptions runtime = new com.aliyun.teautil.models.RuntimeOptions();
 
             com.aliyun.dypnsapi20170525.models.SendSmsVerifyCodeResponse resp = client.sendSmsVerifyCodeWithOptions(sendSmsVerifyCodeRequest, runtime);
-            System.out.println(new com.google.gson.Gson().toJson(resp));
             if (resp.getStatusCode() == 200 && "OK".equals(resp.getBody().getCode())) {
                 return true;
             }
         } catch (TeaException error) {
             // 此处仅做打印展示，请谨慎对待异常处理，在工程项目中切勿直接忽略异常。
             // 错误 message
-            System.out.println(error.getMessage());
             // 诊断地址
-            System.out.println(error.getData().get("Recommend"));
         } catch (Exception _error) {
             TeaException error = new TeaException(_error.getMessage(), _error);
             // 此处仅做打印展示，请谨慎对待异常处理，在工程项目中切勿直接忽略异常。
             // 错误 message
-            System.out.println(error.getMessage());
             // 诊断地址
-            System.out.println(error.getData().get("Recommend"));
         }
         return false;
     }
@@ -211,7 +206,6 @@ public class AliyunSmsHelper {
         obj.put("code", "888888");
         obj.put("min", 5);
         boolean result = sendSms("13650962253", obj);
-        System.out.println(result);
     }
 
 }

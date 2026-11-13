@@ -44,11 +44,17 @@ public class ItemTopicVO implements Serializable {
     @Schema(description = "主题名称")
     private String topicName;
 
+    @Schema(description = "子标题")
+    private String topicSubtitle;
+
     @Schema(description = "主题类型")
     private Integer topicType;
 
     @Schema(description = "主题ICON")
     private String topicIcon;
+
+    @Schema(description = "背景图")
+    private String bgImage;
 
     @Schema(description = "主题描述")
     private String topicDesc;

@@ -75,6 +75,20 @@ public class ItemSync implements Serializable {
     @Schema(description = "状态")
     private Integer status;
 
+    /**
+     * 仓位ID（仅用于上传/下载链路透传，不落库）
+     */
+    @Schema(description = "仓位ID")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String stationId;
+
+    /**
+     * 仓位类型：1虚拟仓 2真实站点仓（仅用于链路透传，不落库）
+     */
+    @Schema(description = "仓位类型：1虚拟仓 2真实站点仓")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Integer stationType;
+
     @Schema(description = "组件列表")
     private String fields;
 

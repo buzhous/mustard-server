@@ -310,8 +310,8 @@ jeecg:
   smsSendType: aliyun
   #阿里云oss存储和大鱼短信秘钥配置
   oss:
-    accessKey: ??
-    secretKey: ??
+    accessKey: ${ALIYUN_ACCESS_KEY:??}
+    secretKey: ${ALIYUN_SECRET_KEY:??}
     endpoint: oss-cn-shenzhen.aliyuncs.com
     bucketName: msdoss
     staticDomain: https://msdoss.buzhous.com

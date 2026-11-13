@@ -265,6 +265,35 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         return true;
     }
 
+    /**
+     * 从 ItemInfo 批量补充仓位信息到同步记录（仅内存透传，不落库）
+     */
+    private void fillStationFromItemInfo(List<ItemSync> items) {
+        if (ObjectUtil.isEmpty(items)) {
+            return;
+        }
+        List<String> itemIds = items.stream()
+                .map(ItemSync::getItemId)
+                .filter(ObjectUtil::isNotEmpty)
+                .distinct()
+                .toList();
+        if (ObjectUtil.isEmpty(itemIds)) {
+            return;
+        }
+        Map<String, org.jeecg.modules.app.entity.ItemInfo> itemInfoMap = itemInfoService.listByIds(itemIds)
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        info -> String.valueOf(info.getId()), info -> info, (a, b) -> a));
+        for (ItemSync item : items) {
+            org.jeecg.modules.app.entity.ItemInfo info = itemInfoMap.get(item.getItemId());
+            if (info == null) {
+                continue;
+            }
+            item.setStationId(info.getStationId());
+            item.setStationType(info.getStationType());
+        }
+    }
+
     @Override
     public ItemSyncDownloadRspVO syncDownload(ItemSyncDownloadReqVO syncVO) {
         // 查询单个同步队列信息
@@ -313,6 +342,9 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
                 needAddOrUpdateList.add(item);
             }
         }
+
+        // 补充仓位信息（ItemSync 不落库仓位字段，从 ItemInfo 实时补充，供客户端展示/同步）
+        fillStationFromItemInfo(needAddOrUpdateList);
 
         ItemSyncDownloadIncrementalRspVO rspVO = new ItemSyncDownloadIncrementalRspVO();
         rspVO.setServerTime(now.getTime());
