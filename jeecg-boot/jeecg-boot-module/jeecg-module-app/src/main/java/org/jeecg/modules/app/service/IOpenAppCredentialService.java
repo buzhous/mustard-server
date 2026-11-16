@@ -26,7 +26,7 @@ public interface IOpenAppCredentialService extends IService<OpenAppCredential> {
     OpenAppCredential disableByUser(String uid);
 
     /**
-     * 用户重置授权密钥：重新生成 AppKey/AppSecret 并启用
+     * 用户重置授权密钥：重新生成 AppKey（随机 SHA-1 哈希）并启用
      */
     OpenAppCredential resetSecretByUser(String uid);
 }

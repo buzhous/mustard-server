@@ -1,7 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
-import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.SecureUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.modules.app.entity.OpenAppCredential;
@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
+import java.util.UUID;
 
 @Service
 public class OpenAppCredentialServiceImpl
@@ -46,7 +47,6 @@ public class OpenAppCredentialServiceImpl
         if (credential == null) {
             credential = new OpenAppCredential()
                     .setAppKey(generateUniqueAppKey())
-                    .setAppSecret(RandomUtil.randomString(32))
                     .setAppName("个人开放授权")
                     .setBoundUid(uid)
                     .setStatus(1)
@@ -83,7 +83,6 @@ public class OpenAppCredentialServiceImpl
             return enableByUser(uid);
         }
         credential.setAppKey(generateUniqueAppKey());
-        credential.setAppSecret(RandomUtil.randomString(32));
         credential.setStatus(1);
         credential.setUpdateTime(new Date());
         this.updateById(credential);
@@ -91,18 +90,18 @@ public class OpenAppCredentialServiceImpl
     }
 
     /**
-     * 生成唯一 AppKey，冲突时重试
+     * 生成唯一 AppKey：随机 SHA-1 哈希值（40 位小写十六进制），冲突时重试
      */
     private String generateUniqueAppKey() {
         for (int i = 0; i < 5; i++) {
-            String appKey = RandomUtil.randomStringUpper(16);
+            String appKey = SecureUtil.sha1(UUID.randomUUID() + ":" + System.nanoTime());
             long count = this.count(new LambdaQueryWrapper<OpenAppCredential>()
                     .eq(OpenAppCredential::getAppKey, appKey));
             if (count == 0) {
                 return appKey;
             }
         }
-        // 兜底：时间戳拼接保证唯一
-        return RandomUtil.randomStringUpper(8) + System.currentTimeMillis();
+        // 兜底：哈希拼接时间戳保证唯一
+        return SecureUtil.sha1(UUID.randomUUID() + ":" + System.currentTimeMillis());
     }
 }
