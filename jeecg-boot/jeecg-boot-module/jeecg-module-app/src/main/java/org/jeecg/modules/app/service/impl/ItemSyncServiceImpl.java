@@ -8,12 +8,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
+import org.jeecg.modules.app.bean.enums.ItemStatusEnum;
 import org.jeecg.modules.app.bean.enums.SyncOpsEnum;
 import org.jeecg.modules.app.bean.enums.SyncStatusEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.inventory.ItemInventoryVO;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoCreateVO;
 import org.jeecg.modules.app.bean.vo.queue.*;
+import org.jeecg.modules.app.entity.ItemInfo;
 import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.ItemUserInventory;
 import org.jeecg.modules.app.mapper.ItemSyncMapper;
@@ -230,6 +232,12 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         int inventoryQuantity = ObjectUtil.isEmpty(inventory.getQuantity()) ? 0 : inventory.getQuantity();
         int destroyQuantity = ObjectUtil.isEmpty(syncVO.getQuantity()) ? inventoryQuantity : syncVO.getQuantity();
 
+        // 库存已清零时销毁视为幂等完成：直接标记销毁并掉落废墟，
+        // 避免同步队列重试时反复报“物品数量不足”卡死队列
+        if (inventoryQuantity == 0) {
+            return destroyItemCompletely(itemSyncExist, syncVO.getVersion());
+        }
+
         if (destroyQuantity > inventoryQuantity) {
             throw new AppException(ExceptionEnum.INSUFFICIENT_QUANTITY);
         }
@@ -242,19 +250,22 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     }
 
     private boolean destroyItemCompletely(ItemSync itemSyncExist, Integer version) {
-        ItemSync itemSyncUpdate = new ItemSync();
-        itemSyncUpdate.setId(itemSyncExist.getId());
-        itemSyncUpdate.setStatus(SyncStatusEnum.DESTROYED.getCode());
-        itemSyncUpdate.setVersion(version);
-        this.updateById(itemSyncUpdate);
+        // 条件原子更新：仅未销毁状态可翻转，防止重复销毁并发覆盖
+        int rows = this.baseMapper.markDestroyedIfNot(itemSyncExist.getId(), SyncStatusEnum.DESTROYED.getCode(), version);
+        if (rows == 0) {
+            throw new AppException(ExceptionEnum.ITEM_DESTROYED);
+        }
 
         return itemRuinsService.dropToRuins(itemSyncExist);
     }
 
-    private boolean destroyPartialQuantity(ItemSync itemSyncExist, ItemUserInventory inventory, 
+    private boolean destroyPartialQuantity(ItemSync itemSyncExist, ItemUserInventory inventory,
                                            int inventoryQuantity, int destroyQuantity, Integer version) {
-        inventory.setQuantity(inventoryQuantity - destroyQuantity);
-        itemUserInventoryService.updateItemById(inventory);
+        // 条件原子扣减库存数量：quantity = quantity - ? WHERE id = ? AND quantity >= ?
+        int rows = itemUserInventoryService.decreaseQuantityIfEnough(inventory.getId(), destroyQuantity);
+        if (rows == 0) {
+            throw new AppException(ExceptionEnum.INSUFFICIENT_QUANTITY);
+        }
 
         ItemSync itemSyncUpdate = new ItemSync();
         itemSyncUpdate.setId(itemSyncExist.getId());
@@ -365,23 +376,59 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     }
 
     @Override
-    public boolean syncFromRuins(ItemSyncReqVO syncVO) {
-        ItemSync itemSync = JSON.parseObject(JSON.toJSONString(syncVO), ItemSync.class);
-        itemSync.setSyncStatus(SyncStatusEnum.UNSYNCED.getCode());
-        ItemSync itemSyncExist = this.queryItemSyncByItemId(itemSync.getItemId(), itemSync.getOriId(), itemSync.getUserId());
-        if (ObjectUtil.isEmpty(itemSyncExist)) {
-            MakeSyncIdReqVO makeSyncIdReqVO = new MakeSyncIdReqVO();
-            makeSyncIdReqVO.setOriId(itemSync.getOriId());
-            makeSyncIdReqVO.setUserId(itemSync.getUserId());
-            makeSyncIdReqVO.setItemId(itemSync.getItemId());
-            itemSyncExist = makeSyncId(makeSyncIdReqVO);
+    @Transactional(rollbackFor = Exception.class)
+    public ItemSync syncFromRuins(ItemSyncReqVO syncVO) {
+        if (ObjectUtil.isEmpty(syncVO.getUserId()) || ObjectUtil.isEmpty(syncVO.getOriId())) {
+            throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
         }
-        syncVO.setSyncStatus(SyncStatusEnum.UNSYNCED.getCode());
-        syncVO.setItemId(itemSync.getItemId());
-        syncVO.setInventoryId(itemSync.getInventoryId());
-        syncVO.setVersion(itemSync.getVersion());
-        itemSync.setId(itemSyncExist.getId());
-        return this.updateById(itemSync);
+        // 创建拾取者名下线上物品（同oriId已持有则复用），数量取殷墟记录
+        ItemInfoCreateVO itemInfoCreateVO = FieldElementUtil.convertObject(syncVO, new ItemInfoCreateVO());
+        itemInfoCreateVO.setUserId(syncVO.getUserId());
+        itemInfoCreateVO.setOriId(syncVO.getOriId());
+        itemInfoCreateVO.setQuantity(syncVO.getQuantity());
+        itemInfoCreateVO.setCategory("0");
+        itemInfoCreateVO.setStatus(ItemStatusEnum.NORMAL.getCode());
+        itemInfoService.createItemInfo(itemInfoCreateVO);
+        String newItemId = itemInfoCreateVO.getItemId();
+
+        // 库存：未持有则新建库存记录，已持有（重新拾取）则原子累加数量
+        String inventoryId;
+        ItemUserInventory existInventory = itemUserInventoryService.queryUserItem(syncVO.getUserId(), newItemId);
+        if (ObjectUtil.isEmpty(existInventory)) {
+            ItemInventoryVO inventoryVO = FieldElementUtil.convertObject(syncVO, new ItemInventoryVO());
+            inventoryVO.setUserId(syncVO.getUserId());
+            inventoryVO.setItemId(newItemId);
+            inventoryVO.setQuantity(syncVO.getQuantity());
+            itemUserInventoryService.createItemUserInventory(inventoryVO);
+            inventoryId = inventoryVO.getId();
+        } else {
+            itemUserInventoryService.increaseQuantity(existInventory.getId(), syncVO.getQuantity());
+            inventoryId = existInventory.getId();
+        }
+
+        // 同步记录：不存在则新增，已存在（重新拾取）则更新
+        ItemSync itemSync = JSON.parseObject(JSON.toJSONString(syncVO), ItemSync.class);
+        itemSync.setItemId(newItemId);
+        itemSync.setInventoryId(inventoryId);
+        itemSync.setUserId(syncVO.getUserId());
+        itemSync.setSyncStatus(SyncStatusEnum.UNSYNCED.getCode());
+        ItemSync itemSyncExist = this.queryItemSyncByItemId(newItemId, syncVO.getOriId(), syncVO.getUserId());
+        if (ObjectUtil.isEmpty(itemSyncExist)) {
+            itemSync.setVersion(1);
+            this.save(itemSync);
+        } else {
+            itemSync.setId(itemSyncExist.getId());
+            itemSync.setVersion(ObjectUtil.isEmpty(itemSyncExist.getVersion()) ? 1 : itemSyncExist.getVersion() + 1);
+            this.updateById(itemSync);
+        }
+
+        // 补充仓位信息返回给app（ItemSync不落库仓位字段，从ItemInfo实时补充）
+        ItemInfo itemInfo = itemInfoService.getById(newItemId);
+        if (ObjectUtil.isNotEmpty(itemInfo)) {
+            itemSync.setStationId(itemInfo.getStationId());
+            itemSync.setStationType(itemInfo.getStationType());
+        }
+        return itemSync;
     }
 
     @Override

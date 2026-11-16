@@ -217,4 +217,20 @@ public class ItemUserInventoryServiceImpl extends ServiceImpl<ItemUserInventoryM
         return false;
     }
 
+    @Override
+    public int decreaseQuantityIfEnough(String id, Integer quantity) {
+        if (StrUtil.isEmpty(id) || quantity == null || quantity <= 0) {
+            return 0;
+        }
+        return this.baseMapper.decreaseQuantityIfEnough(id, quantity);
+    }
+
+    @Override
+    public int increaseQuantity(String id, Integer quantity) {
+        if (StrUtil.isEmpty(id) || quantity == null || quantity <= 0) {
+            return 0;
+        }
+        return this.baseMapper.increaseQuantity(id, quantity);
+    }
+
 }

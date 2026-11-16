@@ -68,8 +68,8 @@ public class Topic implements Serializable {
     @Schema(description = "主题状态")
     private Integer topicStatus;
 
-    @Schema(description = "物品分类")
-    private Integer itemCate;
+    @Schema(description = "物品分类ID")
+    private String itemCate;
 
     @Schema(description = "是否热门")
     private Integer isHot;

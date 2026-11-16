@@ -94,9 +94,9 @@ public interface IItemSyncService extends IService<ItemSync> {
     ItemSyncDownloadIncrementalRspVO syncDownloadIncremental(ItemSyncDownloadReqVO syncVO);
 
     /**
-     * 从销毁物品记录同步物品
+     * 从销毁物品记录同步物品（写入完整物品信息、库存与同步记录，返回同步后的记录）
      */
-    boolean syncFromRuins(ItemSyncReqVO syncVO);
+    ItemSync syncFromRuins(ItemSyncReqVO syncVO);
 
     /**
      * 批量同步上传

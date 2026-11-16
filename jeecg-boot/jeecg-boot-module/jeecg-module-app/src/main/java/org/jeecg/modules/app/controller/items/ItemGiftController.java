@@ -11,6 +11,7 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftListVO;
+import org.jeecg.modules.app.bean.vo.gift.ItemGiftReceiveVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftReqVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftRspVO;
 import org.jeecg.modules.app.bean.vo.gift.ReceiveGiftReqVO;
@@ -45,12 +46,16 @@ public class ItemGiftController {
         if (ObjectUtil.isEmpty(loginUser)) {
             throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
-        // 查找用户
+        // 查找用户：仅返回用户名、头像、昵称，避免泄露手机号等隐私字段
         List<AppUser> list = userService.findUserListByUsername(username);
         List<UserInfoVO> listUsers = new ArrayList<>();
         if (CollectionUtil.isNotEmpty(list)) {
             for (AppUser user : list) {
-                UserInfoVO userVO = JSONUtil.toBean(JSONUtil.toJsonStr(user), UserInfoVO.class);
+                UserInfoVO userVO = new UserInfoVO();
+                userVO.setId(user.getId());
+                userVO.setUsername(user.getUsername());
+                userVO.setNickname(user.getNickname());
+                userVO.setAvatar(user.getAvatar());
                 listUsers.add(userVO);
             }
         }
@@ -102,6 +107,16 @@ public class ItemGiftController {
         Page<ItemGift> page = new Page<>(pageNo, pageSize);
         Page<ItemGiftListVO> result = itemGiftService.queryGiftList(page, loginUser.getId(), type);
         return Result.OK(result);
+    }
+
+    @Operation(summary = "赠送领取明细（多人领取记录）")
+    @GetMapping(value = "/receivers")
+    public Result<List<ItemGiftReceiveVO>> receivers(@RequestParam String giftId) {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
+        }
+        return Result.OK(itemGiftService.queryGiftReceivers(giftId));
     }
 
     @Operation(summary = "赠送详情")

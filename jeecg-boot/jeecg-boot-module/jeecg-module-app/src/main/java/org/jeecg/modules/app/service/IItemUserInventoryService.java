@@ -49,4 +49,22 @@ public interface IItemUserInventoryService extends IService<ItemUserInventory> {
 
     boolean removeUserItem(String userId, String inventoryId);
 
+    /**
+     * 条件原子扣减库存数量（quantity = quantity - ? WHERE id = ? AND quantity >= ?）
+     *
+     * @param id       库存ID
+     * @param quantity 扣减数量
+     * @return 影响行数（0表示数量不足）
+     */
+    int decreaseQuantityIfEnough(String id, Integer quantity);
+
+    /**
+     * 原子累加库存数量
+     *
+     * @param id       库存ID
+     * @param quantity 累加数量
+     * @return 影响行数
+     */
+    int increaseQuantity(String id, Integer quantity);
+
 }

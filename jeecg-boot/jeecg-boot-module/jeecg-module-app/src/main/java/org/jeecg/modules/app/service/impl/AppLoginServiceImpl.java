@@ -24,6 +24,7 @@ import org.jeecg.modules.app.mapper.AppUserMapper;
 import org.jeecg.modules.app.service.IAppLoginService;
 import org.jeecg.modules.app.service.ISendSmsLogService;
 import org.jeecg.modules.app.service.IUserAmountService;
+import org.jeecg.modules.app.service.IUserRealStationService;
 import org.jeecg.modules.app.service.IUserVirtualStationService;
 import org.jeecg.modules.app.utils.AliyunSmsHelper;
 import org.jeecg.modules.app.utils.SecurityTokenUtil;
@@ -45,6 +46,9 @@ public class AppLoginServiceImpl extends ServiceImpl<AppUserMapper, AppUser> imp
 
     @Autowired
     private IUserVirtualStationService userVirtualStationService;
+
+    @Autowired
+    private IUserRealStationService userRealStationService;
 
 
     @Override
@@ -247,8 +251,9 @@ public class AppLoginServiceImpl extends ServiceImpl<AppUserMapper, AppUser> imp
             }
             // 创建用户资金账号
             iUserAmountService.createUserAmount(appUser);
-            // 初始化固定虚拟仓库点（每用户 1 个；真实仓由用户绑定站点形成）
+            // 初始化固定虚拟仓库点（每用户 1 个）与默认真实仓（每用户 1 个，支持编辑收件地址/定位）
             userVirtualStationService.ensureUserVirtualStation(appUser.getId());
+            userRealStationService.ensureUserRealStation(appUser.getId());
             return appUser;
         }
         return null;

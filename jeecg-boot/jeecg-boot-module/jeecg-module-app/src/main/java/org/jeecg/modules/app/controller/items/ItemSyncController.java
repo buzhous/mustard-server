@@ -112,7 +112,7 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
             return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
         }
         // 设置用户ID
-        syncReqVO.setUserId("2048739717880901634");
+        syncReqVO.setUserId(loginUser.getId());
         boolean result = false;
         switch (SyncOpsEnum.fromCode(syncReqVO.getSyncOps())) {
             case ADD:

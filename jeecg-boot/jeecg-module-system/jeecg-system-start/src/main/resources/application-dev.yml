@@ -155,10 +155,10 @@ spring:
   #redis 配置
   data:
     redis:
-      database: 7
-      host: 8.134.112.180
+      database: 1
+      host: 118.145.133.109
       port: 6379
-      password: OIGBsn7ZM2aGvmZ
+      password: daboo123@Ra
 #mybatis plus 设置
 mybatis-plus:
   mapper-locations: classpath*:org/jeecg/**/xml/*Mapper.xml
@@ -393,11 +393,12 @@ jeecg:
     port: 30007
     logPath: logs/jeecg/job/jobhandler/
     logRetentionDays: 30
-  #分布式锁配置
+  #分布式锁配置（starter 会自动补 redis:// 前缀，此处不能带协议头）
   redisson:
-    address: 127.0.0.1:6379
-    password:
+    address: 118.145.133.109:6379
+    password: daboo123@Ra
     type: STANDALONE
+    database: 1
     enabled: true
   # 百度开放API配置
   baidu-api:

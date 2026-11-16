@@ -1,6 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.RandomUtil;
@@ -13,12 +14,15 @@ import org.jeecg.modules.app.bean.enums.GiftTypeEnum;
 import org.jeecg.modules.app.bean.enums.SyncStatusEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftListVO;
+import org.jeecg.modules.app.bean.vo.gift.ItemGiftReceiveVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftReqVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftRspVO;
 import org.jeecg.modules.app.bean.vo.gift.ReceiveGiftReqVO;
 import org.jeecg.modules.app.entity.*;
+import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.mapper.ItemGiftMapper;
 import org.jeecg.modules.app.mapper.ItemGiftReceiveMapper;
+import org.jeecg.modules.app.service.IAppUserService;
 import org.jeecg.modules.app.service.IItemGiftService;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IItemSyncService;
@@ -29,7 +33,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> implements IItemGiftService {
@@ -45,6 +54,10 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
     @Lazy
     @Autowired
     private IItemSyncService itemSyncService;
+
+    @Lazy
+    @Autowired
+    private IAppUserService appUserService;
 
     @Autowired
     private ItemGiftReceiveMapper itemGiftReceiveMapper;
@@ -291,10 +304,23 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
         LambdaQueryWrapper<ItemGift> queryWrapper = new LambdaQueryWrapper<>();
 
         if (type != null && type == 1) {
+            // 我送出的
             queryWrapper.eq(ItemGift::getSenderUserId, userId);
         } else if (type != null && type == 2) {
-            queryWrapper.eq(ItemGift::getReceiverUserId, userId);
-            queryWrapper.eq(ItemGift::getGiftType, GiftTypeEnum.DIRECT.getCode());
+            // 我收到的：定向赠送给我的 + 我领取过的赠送（领取明细反查，含公开赠送多人领取）
+            queryWrapper.and(w -> w.eq(ItemGift::getReceiverUserId, userId)
+                    .eq(ItemGift::getGiftType, GiftTypeEnum.DIRECT.getCode()));
+            LambdaQueryWrapper<ItemGiftReceive> receiveWrapper = new LambdaQueryWrapper<>();
+            receiveWrapper.eq(ItemGiftReceive::getUserId, userId);
+            List<ItemGiftReceive> receiveList = itemGiftReceiveMapper.selectList(receiveWrapper);
+            List<String> receivedGiftIds = receiveList.stream()
+                    .map(ItemGiftReceive::getGiftId)
+                    .filter(ObjectUtil::isNotEmpty)
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (CollectionUtil.isNotEmpty(receivedGiftIds)) {
+                queryWrapper.or(w -> w.in(ItemGift::getId, receivedGiftIds));
+            }
         }
 
         queryWrapper.orderByDesc(ItemGift::getCreateTime);
@@ -302,6 +328,7 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
 
         Page<ItemGiftListVO> voPage = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
         List<ItemGiftListVO> voList = new java.util.ArrayList<>();
+        Set<String> userIds = new HashSet<>();
 
         for (ItemGift gift : resultPage.getRecords()) {
             ItemGiftListVO vo = cn.hutool.core.bean.BeanUtil.copyProperties(gift, ItemGiftListVO.class);
@@ -334,7 +361,26 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
                 }
             }
 
+            if (ObjectUtil.isNotEmpty(gift.getSenderUserId())) {
+                userIds.add(gift.getSenderUserId());
+            }
+            if (ObjectUtil.isNotEmpty(gift.getReceiverUserId())) {
+                userIds.add(gift.getReceiverUserId());
+            }
+
             voList.add(vo);
+        }
+
+        // 批量组装赠送者/接收者昵称，避免循环内逐条查询用户
+        if (CollectionUtil.isNotEmpty(userIds)) {
+            Map<String, AppUser> userMap = new HashMap<>();
+            for (AppUser user : appUserService.listByIds(userIds)) {
+                userMap.put(user.getId(), user);
+            }
+            for (ItemGiftListVO vo : voList) {
+                vo.setSenderNickname(getDisplayNickname(userMap.get(vo.getSenderUserId())));
+                vo.setReceiverNickname(getDisplayNickname(userMap.get(vo.getReceiverUserId())));
+            }
         }
 
         voPage.setRecords(voList);
@@ -342,11 +388,83 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
     }
 
     @Override
+    public List<ItemGiftReceiveVO> queryGiftReceivers(String giftId) {
+        LambdaQueryWrapper<ItemGiftReceive> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ItemGiftReceive::getGiftId, giftId);
+        queryWrapper.orderByDesc(ItemGiftReceive::getReceiveTime);
+        List<ItemGiftReceive> receiveList = itemGiftReceiveMapper.selectList(queryWrapper);
+
+        List<ItemGiftReceiveVO> voList = new java.util.ArrayList<>();
+        if (CollectionUtil.isEmpty(receiveList)) {
+            return voList;
+        }
+
+        // 批量查询领取者昵称与头像
+        Set<String> userIds = new HashSet<>();
+        for (ItemGiftReceive receive : receiveList) {
+            if (ObjectUtil.isNotEmpty(receive.getUserId())) {
+                userIds.add(receive.getUserId());
+            }
+        }
+        Map<String, AppUser> userMap = new HashMap<>();
+        if (CollectionUtil.isNotEmpty(userIds)) {
+            for (AppUser user : appUserService.listByIds(userIds)) {
+                userMap.put(user.getId(), user);
+            }
+        }
+
+        for (ItemGiftReceive receive : receiveList) {
+            ItemGiftReceiveVO vo = new ItemGiftReceiveVO();
+            vo.setId(receive.getId());
+            vo.setUserId(receive.getUserId());
+            vo.setQuantity(receive.getQuantity());
+            vo.setReceiveTime(receive.getReceiveTime());
+            AppUser user = userMap.get(receive.getUserId());
+            if (user != null) {
+                vo.setNickname(getDisplayNickname(user));
+                vo.setAvatar(user.getAvatar());
+            }
+            voList.add(vo);
+        }
+        return voList;
+    }
+
+    private String getDisplayNickname(AppUser user) {
+        if (user == null) {
+            return "";
+        }
+        return ObjectUtil.isNotEmpty(user.getNickname()) ? user.getNickname() : user.getUsername();
+    }
+
+    @Override
     public ItemGift getGiftByCode(String giftCode) {
         LambdaQueryWrapper<ItemGift> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ItemGift::getGiftCode, giftCode);
         queryWrapper.last("limit 1");
-        return this.getOne(queryWrapper);
+        ItemGift itemGift = this.getOne(queryWrapper);
+        // 扫码领取需要展示物品信息与赠送人昵称
+        if (itemGift != null) {
+            if (ObjectUtil.isNotEmpty(itemGift.getItemId())) {
+                ItemInfo itemInfo = itemInfoService.getById(itemGift.getItemId());
+                if (itemInfo == null && ObjectUtil.isNotEmpty(itemGift.getOriId())) {
+                    ItemSync itemSync = itemSyncService.getItemSyncByOriIdAndUserId(
+                            itemGift.getOriId(), itemGift.getSenderUserId());
+                    if (itemSync != null) {
+                        itemInfo = itemInfoService.getById(itemSync.getItemId());
+                    }
+                }
+                itemGift.setItemInfo(itemInfo);
+            }
+            if (ObjectUtil.isNotEmpty(itemGift.getSenderUserId())) {
+                AppUser sender = appUserService.getById(itemGift.getSenderUserId());
+                if (sender != null) {
+                    String nickname = ObjectUtil.isNotEmpty(sender.getNickname())
+                            ? sender.getNickname() : sender.getUsername();
+                    itemGift.setSenderNickname(nickname);
+                }
+            }
+        }
+        return itemGift;
     }
 
     private String generateGiftCode() {

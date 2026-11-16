@@ -22,6 +22,9 @@ public class ItemRuinsListVO implements Serializable {
     @Schema(description = "初始ID")
     private String oriId;
 
+    @Schema(description = "殷墟记录主键ID（拾取入参 ruinsId）")
+    private String ruinsId;
+
     @Schema(description = "物品ID")
     private String itemId;
 

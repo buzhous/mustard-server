@@ -41,5 +41,4 @@ public class AppSquareController {
         return Result.OK(iAppSquareService.getTopicPage(searchKey, page, size));
     }
 
-
 }

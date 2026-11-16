@@ -66,12 +66,13 @@ public class AppUserServiceImpl extends ServiceImpl<AppUserMapper, AppUser> impl
 
     @Override
     public List<AppUser> findUserListByUsername(String username) {
-        if (StrUtil.isEmpty(username) || username.length() <= 3) {
+        // 输入超过 5 位才允许模糊查询，最多返回前 5 个
+        if (StrUtil.isEmpty(username) || username.length() <= 5) {
             return new ArrayList<>();
         }
         QueryWrapper<AppUser> queryWrapper = new QueryWrapper<>();
         queryWrapper.lambda().like(AppUser::getUsername, username);
-        queryWrapper.last("limit 20");
+        queryWrapper.last("limit 5");
         return this.list(queryWrapper);
     }
 

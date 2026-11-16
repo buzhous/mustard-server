@@ -139,6 +139,11 @@ public class AppUser implements Serializable {
     @Schema(description = "注册时间")
     private java.util.Date registerAt;
 
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "VIP到期时间")
+    private java.util.Date vipExpireTime;
+
     private String salt;
 
     @TableField(exist = false)

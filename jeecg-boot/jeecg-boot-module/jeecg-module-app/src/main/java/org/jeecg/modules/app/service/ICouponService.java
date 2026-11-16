@@ -24,4 +24,12 @@ public interface ICouponService extends IService<Coupon> {
 
     Coupon createCoupon(CouponCreateVO createVO);
 
+    /**
+     * 根据编码查询优惠券
+     *
+     * @param code 优惠券编码
+     * @return 优惠券，不存在返回null
+     */
+    Coupon getByCode(String code);
+
 }

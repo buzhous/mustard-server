@@ -76,4 +76,18 @@ public class StationConstant {
         return VIRTUAL_STATION_NO_PREFIX + tail;
     }
 
+    /**
+     * 用户默认真实仓编号前缀
+     */
+    public static final String REAL_STATION_NO_PREFIX = "RS";
+
+    /**
+     * 生成用户默认真实仓编号：RS + 用户Id 末 6 位（不足补齐），与用户固定关联
+     */
+    public static String buildRealStationNo(String userId) {
+        String tail = userId == null ? "000000" : userId;
+        tail = tail.length() >= 6 ? tail.substring(tail.length() - 6) : String.format("%06d", Math.abs(tail.hashCode()) % 1000000);
+        return REAL_STATION_NO_PREFIX + tail;
+    }
+
 }

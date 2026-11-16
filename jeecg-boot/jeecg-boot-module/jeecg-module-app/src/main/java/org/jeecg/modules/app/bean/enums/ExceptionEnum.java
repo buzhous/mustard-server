@@ -26,6 +26,8 @@ public enum ExceptionEnum {
     ITEM_NOT_EXIST(10200, "物品不存在"),
     ITEM_DESTROYED(10201, "物品已被销毁"),
     INSUFFICIENT_QUANTITY(10202, "物品数量不足"),
+    RUINS_ALREADY_PICKED(10203, "手慢了，已被别人拾取"),
+    RUINS_PICKUP_COUPON_NOT_ENOUGH(10204, "拾取券不足，请先领取"),
     // 赠送 10600-10700
     GIFT_NOT_EXIST(10600, "赠送记录不存在"),
     GIFT_CANCELLED(10601, "赠送已撤回"),
@@ -42,6 +44,10 @@ public enum ExceptionEnum {
     STATION_ALREADY_BOUND(10702, "已绑定该仓储站点"),
     STATION_BIND_LIMIT_EXCEEDED(10703, "已达到仓储站点绑定上限"),
     STATION_NOT_BOUND(10704, "未绑定该仓储站点"),
+    // 用户仓库 10710-10720
+    STORAGE_NOT_EXIST(10710, "仓库不存在"),
+    STORAGE_LIMIT_EXCEEDED(10711, "普通用户仅可创建1个仓库，开通VIP可创建3个"),
+    STORAGE_NOT_REAL(10712, "仅真实仓库支持该操作"),
     // 优惠券 10500-10600
     COUPON_NOT_EXIST(10500, "优惠券不存在"),
     COUPON_ALREADY_PUBLISHED(10501, "优惠券已发布"),
@@ -51,6 +57,7 @@ public enum ExceptionEnum {
     COUPON_NOT_IN_VALID_TIME(10505, "优惠券不在领取时间范围内"),
     COUPON_RECEIVE_LIMIT_EXCEEDED(10506, "已达到领取上限"),
     COUPON_DAILY_LIMIT_EXCEEDED(10511, "今日已达领取上限"),
+    COUPON_DAILY_ALREADY_CLAIMED(10512, "今日已领取，明天再来吧"),
     USER_COUPON_NOT_EXIST(10507, "用户优惠券不存在"),
     COUPON_NOT_BELONG_TO_USER(10508, "优惠券不属于该用户"),
     COUPON_ALREADY_USED(10509, "优惠券已使用"),

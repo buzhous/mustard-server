@@ -3,10 +3,13 @@ package org.jeecg.modules.app.service;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftListVO;
+import org.jeecg.modules.app.bean.vo.gift.ItemGiftReceiveVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftReqVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftRspVO;
 import org.jeecg.modules.app.bean.vo.gift.ReceiveGiftReqVO;
 import org.jeecg.modules.app.entity.ItemGift;
+
+import java.util.List;
 
 /**
  * 物品赠送服务接口
@@ -49,6 +52,14 @@ public interface IItemGiftService extends IService<ItemGift> {
      * @return 分页结果
      */
     Page<ItemGiftListVO> queryGiftList(Page<ItemGift> page, String userId, Integer type);
+
+    /**
+     * 查询赠送领取明细（多人领取记录）
+     *
+     * @param giftId 赠送记录ID
+     * @return 领取明细列表（昵称、头像、数量、领取时间）
+     */
+    List<ItemGiftReceiveVO> queryGiftReceivers(String giftId);
 
     /**
      * 根据兑换码查询赠送记录

@@ -5,11 +5,12 @@ package org.jeecg.modules.app.bean.enums;
  */
 public enum RuinsStatusEnum {
 
-    // 拾取状态：0-未拾取 1-已拾取 2-已收回 3-已充公
+    // 拾取状态：0-未拾取 1-已拾取 2-已收回 3-已充公 4-已下架
     NOT_PICKUP(0, "未拾取"),
     PICKUP(1, "已拾取"),
     RECALLED(2, "已收回"),
     CONFISCATED(3, "已充公"),
+    OFF_SHELF(4, "已下架"),
     ;
     private int code;
     private String name;

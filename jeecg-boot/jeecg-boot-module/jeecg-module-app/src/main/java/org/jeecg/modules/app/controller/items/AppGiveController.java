@@ -48,12 +48,16 @@ public class AppGiveController {
             throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
 
-        // 查找用户
+        // 查找用户：仅返回用户名、头像、昵称，避免泄露手机号等隐私字段
         List<AppUser> list = userService.findUserListByUsername(username);
         List<UserInfoVO> listUsers = new ArrayList<>();
         if (CollectionUtil.isNotEmpty(list)) {
             for (AppUser user : list) {
-                UserInfoVO userVO = JSONUtil.toBean(JSONUtil.toJsonStr(user), UserInfoVO.class);
+                UserInfoVO userVO = new UserInfoVO();
+                userVO.setId(user.getId());
+                userVO.setUsername(user.getUsername());
+                userVO.setNickname(user.getNickname());
+                userVO.setAvatar(user.getAvatar());
                 listUsers.add(userVO);
             }
         }

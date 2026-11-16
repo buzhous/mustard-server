@@ -9,10 +9,9 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.ruins.ItemRuinsListVO;
-import org.jeecg.modules.app.entity.UserCoupon;
+import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.service.IItemRuinsService;
-import org.jeecg.modules.app.service.IUserCouponService;
 import org.jeecg.modules.app.utils.AppAuthUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,9 +28,6 @@ public class AppRuinsController {
     @Autowired
     private IItemRuinsService itemRuinsService;
 
-    @Autowired
-    IUserCouponService userCouponService;
-
 
     @Operation(summary = "废墟列表")
     @GetMapping("/list")
@@ -43,26 +39,20 @@ public class AppRuinsController {
         if (ObjectUtil.isEmpty(loginUser)) {
             throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
-        IPage<ItemRuinsListVO> ruinsIPage = itemRuinsService.queryNotPickupRuinsPage(page, size);
+        IPage<ItemRuinsListVO> ruinsIPage = itemRuinsService.queryNotPickupRuinsPage(page, size, loginUser.getId());
         return Result.OK(ruinsIPage);
     }
 
-    @Operation(summary = "拾取")
+    @Operation(summary = "拾取（消耗一张殷墟拾取券，返回拾取者名下物品信息）")
     @GetMapping("/pickup")
-    public Result<Boolean> pickup(@RequestParam String itemId, @RequestParam String ruinsId) {
+    public Result<ItemSync> pickup(@RequestParam String itemId, @RequestParam String ruinsId) {
         AppUser loginUser = AppAuthUtil.getUserInfo();
         if (ObjectUtil.isEmpty(loginUser)) {
             throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
 
-        Long couponId = 3L; // 拾取优惠券
-        UserCoupon userCoupon = userCouponService.getByUserIdAndCouponId(loginUser.getId(), couponId, ruinsId);
-        if (ObjectUtil.isEmpty(userCoupon)) {
-            throw new AppException(ExceptionEnum.USER_COUPON_NOT_EXIST);
-        }
-
-        boolean result = itemRuinsService.pickup(ruinsId, itemId, loginUser.getId(), userCoupon.getId());
-        return Result.OK(result);
+        ItemSync itemSync = itemRuinsService.pickup(ruinsId, itemId, loginUser.getId());
+        return Result.OK(itemSync);
     }
 
 }

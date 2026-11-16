@@ -132,4 +132,12 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
         return coupon;
     }
 
+    @Override
+    public Coupon getByCode(String code) {
+        if (ObjectUtil.isEmpty(code)) {
+            return null;
+        }
+        return this.baseMapper.selectByCode(code);
+    }
+
 }

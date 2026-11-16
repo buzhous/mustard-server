@@ -74,4 +74,7 @@ public class ItemTopicVO implements Serializable {
     @Schema(description = "主题字段")
     private List<FieldElementVO> fields;
 
+    @Schema(description = "物品分类ID")
+    private String itemCate;
+
 }

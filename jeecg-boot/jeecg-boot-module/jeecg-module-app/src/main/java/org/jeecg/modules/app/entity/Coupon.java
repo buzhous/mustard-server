@@ -39,6 +39,9 @@ public class Coupon implements Serializable {
     @Schema(description = "修改时间")
     private Date updateTime;
 
+    @Schema(description = "优惠券编码（业务固定编码，如RUINS_PICKUP殷墟拾取券）")
+    private String code;
+
     @Schema(description = "优惠券名称")
     private String couponName;
 

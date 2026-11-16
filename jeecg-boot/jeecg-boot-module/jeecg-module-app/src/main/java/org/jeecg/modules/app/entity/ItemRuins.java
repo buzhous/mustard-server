@@ -71,7 +71,15 @@ public class ItemRuins implements Serializable {
     @Schema(description = "用户Id")
     private java.lang.String userId;
 
-    @Schema(description = "状态: 0待拾取，1已拾取，2收回")
+    @Schema(description = "指定拾取者用户Id（非空时仅该用户可见可拾取，拾取后为实际拾取者）")
+    private java.lang.String pickupUser;
+
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "拾取时间")
+    private java.util.Date pickupTime;
+
+    @Schema(description = "状态: 0待拾取，1已拾取，2收回，3充公，4已下架")
     private java.lang.Integer status;
 
     @Schema(description = "组件列表")

@@ -17,4 +17,9 @@ public class LockConstant {
      */
     public static final String COUPON_RECEIVE_LOCK = "lock_coupon_receive:";
 
+    /**
+     * 每日领取拾取券锁
+     */
+    public static final String COUPON_CLAIM_DAILY_LOCK = "lock_coupon_claim_daily:";
+
 }

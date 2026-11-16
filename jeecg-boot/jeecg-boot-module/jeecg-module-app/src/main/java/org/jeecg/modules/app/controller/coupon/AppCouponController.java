@@ -10,8 +10,11 @@ import org.jeecg.common.system.base.controller.JeecgController;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.coupon.CouponCreateVO;
+import org.jeecg.modules.app.bean.vo.coupon.CouponMyVO;
 import org.jeecg.modules.app.bean.vo.coupon.CouponUpdateVO;
+import org.jeecg.modules.app.constant.CouponConstant;
 import org.jeecg.modules.app.entity.Coupon;
+import org.jeecg.modules.app.entity.UserCoupon;
 import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.service.ICouponService;
 import org.jeecg.modules.app.service.IUserCouponService;
@@ -104,6 +107,42 @@ public class AppCouponController extends JeecgController<Coupon, ICouponService>
             throw new AppException(ExceptionEnum.COUPON_NOT_EXIST);
         }
         return Result.OK(coupon);
+    }
+
+    @Operation(summary = "我的拾取券数量")
+    @GetMapping(value = "/my")
+    public Result<CouponMyVO> my() {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
+        }
+        CouponMyVO myVO = new CouponMyVO();
+        myVO.setAvailableCount(userCouponService.countAvailableRuinsPickupCoupons(loginUser.getId()));
+        myVO.setClaimedToday(isClaimedDailyCouponToday(loginUser.getId()));
+        return Result.OK(myVO);
+    }
+
+    /**
+     * 当日是否已领满每日限领数量（领取按钮据此隐藏；券未惰性创建时视为未领取）
+     */
+    private boolean isClaimedDailyCouponToday(String userId) {
+        Coupon coupon = couponService.getByCode(CouponConstant.RUINS_PICKUP_CODE);
+        if (ObjectUtil.isEmpty(coupon)) {
+            return false;
+        }
+        int dailyLimit = CouponConstant.resolveDailyClaimLimit(coupon.getDailyLimit());
+        return userCouponService.countUserDailyReceivedCoupons(userId, coupon.getId()) >= dailyLimit;
+    }
+
+    @Operation(summary = "每日领取拾取券")
+    @PostMapping(value = "/claimDaily")
+    public Result<UserCoupon> claimDaily() {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
+        }
+        UserCoupon userCoupon = userCouponService.claimDailyCoupon(loginUser.getId());
+        return Result.OK(userCoupon);
     }
 
 }
