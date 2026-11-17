@@ -34,4 +34,9 @@ public interface IUserVirtualStationService extends IService<UserVirtualStation>
      * @return 是否成功
      */
     boolean updateLocationDesc(String userId, String locationDesc);
+
+    /**
+     * 更新虚拟仓自定义仓库名
+     */
+    boolean updateCustomName(String userId, String customName);
 }

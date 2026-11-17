@@ -24,4 +24,9 @@ public class UserVirtualStationVO implements Serializable {
 
     @Schema(description = "位置说明(默认:芥子空间平台 OSS 仓库)")
     private String locationDesc;
+
+    /**
+     * 用户自定义仓库名（空则展示默认名「虚拟仓」）
+     */
+    private String customName;
 }

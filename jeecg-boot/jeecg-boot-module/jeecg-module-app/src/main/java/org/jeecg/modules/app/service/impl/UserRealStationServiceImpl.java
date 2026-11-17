@@ -63,6 +63,10 @@ public class UserRealStationServiceImpl extends ServiceImpl<UserRealStationMappe
             throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
         }
         UserRealStation station = ensureUserRealStation(userId);
+        // 仓库名：非空更新，空串清除自定义名（回退默认展示）
+        if (vo.getCustomName() != null) {
+            station.setCustomName(StrUtil.isEmpty(vo.getCustomName()) ? null : vo.getCustomName().trim());
+        }
         if (StrUtil.isNotEmpty(vo.getReceiverName())) {
             station.setReceiverName(vo.getReceiverName());
         }

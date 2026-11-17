@@ -16,7 +16,12 @@ public interface IUserStationBindService extends IService<UserStationBind> {
     /**
      * 绑定站点（校验站点开放、重复绑定、绑定数量上限；首个绑定自动设为主站点）
      */
-    boolean bindStation(String userId, String stationId);
+    boolean bindStation(String userId, String stationId, String customName);
+
+    /**
+     * 修改绑定站点的自定义仓库名
+     */
+    boolean renameBind(String userId, String stationId, String customName);
 
     /**
      * 解绑站点（解绑主站点后自动将最早绑定的剩余站点设为主站点）

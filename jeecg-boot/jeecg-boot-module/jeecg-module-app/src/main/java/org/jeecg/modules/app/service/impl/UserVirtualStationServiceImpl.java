@@ -59,4 +59,15 @@ public class UserVirtualStationServiceImpl extends ServiceImpl<UserVirtualStatio
         station.setUpdateTime(new Date());
         return baseMapper.updateById(station) > 0;
     }
+
+    @Override
+    public boolean updateCustomName(String userId, String customName) {
+        UserVirtualStation station = queryByUserId(userId);
+        if (station == null) {
+            station = ensureUserVirtualStation(userId);
+        }
+        station.setCustomName(cn.hutool.core.util.StrUtil.isEmpty(customName) ? null : customName.trim());
+        station.setUpdateTime(new Date());
+        return baseMapper.updateById(station) > 0;
+    }
 }

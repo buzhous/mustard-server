@@ -57,6 +57,8 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
                     ItemRuinsListVO vo = FieldElementUtil.convertObject(r, new ItemRuinsListVO());
                     // 殷墟记录主键，app 拾取入参 ruinsId
                     vo.setRuinsId(String.valueOf(r.getId()));
+                    // 实体字段为 categoryId，VO 为 category，名称不一致需手动映射
+                    vo.setCategory(r.getCategoryId());
                     return vo;
                 })
                 .collect(Collectors.toList());

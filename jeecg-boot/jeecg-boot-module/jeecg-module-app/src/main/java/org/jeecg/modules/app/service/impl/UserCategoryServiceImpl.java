@@ -7,10 +7,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import org.jeecg.modules.app.bean.enums.ExceptionEnum;
+import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.category.UserCategoryVO;
 import org.jeecg.modules.app.entity.setting.UserCategory;
 import org.jeecg.modules.app.mapper.UserCategoryMapper;
 import org.jeecg.modules.app.service.IUserCategoryService;
+import org.jeecg.modules.app.service.IVipOrderService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.stream.Collectors;
@@ -18,6 +22,12 @@ import java.util.stream.Collectors;
 
 @Service
 public class UserCategoryServiceImpl extends ServiceImpl<UserCategoryMapper, UserCategory> implements IUserCategoryService {
+
+    /** 非会员分类数量上限 */
+    private static final int CATEGORY_LIMIT_NORMAL = 5;
+
+    @Autowired
+    private IVipOrderService vipOrderService;
 
 
     @Override
@@ -55,6 +65,13 @@ public class UserCategoryServiceImpl extends ServiceImpl<UserCategoryMapper, Use
         if (existingCategory != null) {
             add.setId(existingCategory.getId());
             return true;
+        }
+        // 非会员最多拥有 5 个分类（VIP 不限）；重名幂等返回不占额度
+        long count = this.count(new LambdaQueryWrapper<UserCategory>()
+                .eq(UserCategory::getUserId, userCategory.getUserId()));
+        if (!vipOrderService.isVip(userCategory.getUserId())
+                && count >= CATEGORY_LIMIT_NORMAL) {
+            throw new AppException(ExceptionEnum.CATEGORY_LIMIT_EXCEEDED);
         }
         boolean result = this.save(userCategory);
         if (!result) {

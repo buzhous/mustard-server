@@ -49,6 +49,9 @@ public class UserRealStation implements Serializable {
     @Schema(description = "仓库编号")
     private String stationNo;
 
+    @Schema(description = "用户自定义仓库名")
+    private String customName;
+
     @Schema(description = "收件人")
     private String receiverName;
 

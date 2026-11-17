@@ -110,7 +110,8 @@ public class AppWarehouseStationController {
         UserVirtualStationVO virtualVO = new UserVirtualStationVO()
                 .setId(virtual.getId())
                 .setStationNo(virtual.getStationNo())
-                .setLocationDesc(virtual.getLocationDesc());
+                .setLocationDesc(virtual.getLocationDesc())
+                .setCustomName(virtual.getCustomName());
         MyStationsVO vo = new MyStationsVO()
                 .setVirtual(virtualVO)
                 .setReal(userStationBindService.listMyStations(loginUser.getId()));
@@ -132,9 +133,10 @@ public class AppWarehouseStationController {
         return Result.OK("更新成功");
     }
 
-    @Operation(summary = "绑定站点")
+    @Operation(summary = "绑定站点（可携带自定义仓库名）")
     @PostMapping("/bind")
-    public Result<String> bind(@RequestParam(name = "stationId") String stationId) {
+    public Result<String> bind(@RequestParam(name = "stationId") String stationId,
+                               @RequestParam(name = "name", required = false) String name) {
         AppUser loginUser = AppAuthUtil.getUserInfo();
         if (ObjectUtil.isEmpty(loginUser)) {
             return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
@@ -142,8 +144,39 @@ public class AppWarehouseStationController {
         if (ObjectUtil.isEmpty(stationId)) {
             return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
         }
-        userStationBindService.bindStation(loginUser.getId(), stationId);
+        userStationBindService.bindStation(loginUser.getId(), stationId, name);
         return Result.OK("绑定成功", stationId);
+    }
+
+    @Operation(summary = "修改绑定站点仓库名")
+    @PostMapping("/bind/rename")
+    public Result<String> bindRename(@RequestBody Map<String, String> body) {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
+        }
+        String stationId = body == null ? null : body.get("stationId");
+        if (ObjectUtil.isEmpty(stationId)) {
+            return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
+        }
+        userStationBindService.renameBind(loginUser.getId(), stationId,
+                body == null ? null : body.get("name"));
+        return Result.OK("改名成功");
+    }
+
+    @Operation(summary = "修改虚拟仓库名")
+    @PostMapping("/virtual/rename")
+    public Result<String> virtualRename(@RequestBody Map<String, String> body) {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
+        }
+        String name = body == null ? null : body.get("name");
+        if (ObjectUtil.isEmpty(name)) {
+            return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
+        }
+        userVirtualStationService.updateCustomName(loginUser.getId(), name);
+        return Result.OK("改名成功");
     }
 
     @Operation(summary = "解绑站点")

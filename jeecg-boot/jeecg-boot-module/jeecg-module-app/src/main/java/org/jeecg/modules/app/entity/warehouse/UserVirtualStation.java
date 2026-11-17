@@ -54,4 +54,9 @@ public class UserVirtualStation implements Serializable {
     @Excel(name = "位置说明", width = 30)
     @Schema(description = "位置说明(默认:芥子空间平台 OSS 仓库)")
     private String locationDesc;
+
+    /**
+     * 用户自定义仓库名（空则展示默认名「虚拟仓」）
+     */
+    private String customName;
 }

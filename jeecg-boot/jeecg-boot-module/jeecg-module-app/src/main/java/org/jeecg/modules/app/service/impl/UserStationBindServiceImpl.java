@@ -14,6 +14,7 @@ import org.jeecg.modules.app.entity.warehouse.UserStationBind;
 import org.jeecg.modules.app.entity.warehouse.WarehouseStation;
 import org.jeecg.modules.app.mapper.UserStationBindMapper;
 import org.jeecg.modules.app.service.IUserStationBindService;
+import org.jeecg.modules.app.service.IVipOrderService;
 import org.jeecg.modules.app.service.IWarehouseStationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,13 @@ public class UserStationBindServiceImpl extends ServiceImpl<UserStationBindMappe
     @Autowired
     private IWarehouseStationService warehouseStationService;
 
+    @Autowired
+    private IVipOrderService vipOrderService;
+
+    // ItemInfoServiceImpl 构造器注入反向依赖本服务，ObjectProvider 惰性获取避免创建期循环依赖
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<org.jeecg.modules.app.service.IItemInfoService> itemInfoServiceProvider;
+
     @Override
     public List<UserStationBindVO> listMyStations(String userId) {
         List<UserStationBind> binds = listBinds(userId);
@@ -47,6 +55,7 @@ public class UserStationBindServiceImpl extends ServiceImpl<UserStationBindMappe
                 .map(bind -> {
                     UserStationBindVO vo = new UserStationBindVO();
                     BeanUtil.copyProperties(bind, vo);
+                    vo.setCustomName(bind.getCustomName());
                     WarehouseStationVO stationVO = new WarehouseStationVO();
                     BeanUtil.copyProperties(stationMap.get(bind.getStationId()), stationVO);
                     int total = stationMap.get(bind.getStationId()).getTotalCapacity() == null ? 0 : stationMap.get(bind.getStationId()).getTotalCapacity();
@@ -64,7 +73,7 @@ public class UserStationBindServiceImpl extends ServiceImpl<UserStationBindMappe
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean bindStation(String userId, String stationId) {
+    public boolean bindStation(String userId, String stationId, String customName) {
         WarehouseStation station = warehouseStationService.getById(stationId);
         if (ObjectUtil.isEmpty(station)) {
             throw new AppException(ExceptionEnum.STATION_NOT_EXIST);
@@ -76,15 +85,20 @@ public class UserStationBindServiceImpl extends ServiceImpl<UserStationBindMappe
             throw new AppException(ExceptionEnum.STATION_ALREADY_BOUND);
         }
         long boundCount = listBinds(userId).size();
-        if (boundCount >= StationConstant.MAX_BIND_COUNT_NORMAL) {
+        // 仓库数量分级：普通用户 1 个，会员 3 个
+        int limit = vipOrderService.isVip(userId)
+                ? StationConstant.MAX_BIND_COUNT_VIP : StationConstant.MAX_BIND_COUNT_NORMAL;
+        if (boundCount >= limit) {
             throw new AppException(ExceptionEnum.STATION_BIND_LIMIT_EXCEEDED,
-                    "当前等级最多可绑定" + StationConstant.MAX_BIND_COUNT_NORMAL + "个仓储站点");
+                    "普通用户最多可创建" + StationConstant.MAX_BIND_COUNT_NORMAL + "个仓库，开通会员可创建"
+                            + StationConstant.MAX_BIND_COUNT_VIP + "个");
         }
 
         Date now = DateUtil.date();
         UserStationBind bind = new UserStationBind()
                 .setUserId(userId)
                 .setStationId(stationId)
+                .setCustomName(cn.hutool.core.util.StrUtil.isEmpty(customName) ? null : customName.trim())
                 .setIsDefault(boundCount == 0 ? StationConstant.IS_DEFAULT_YES : StationConstant.IS_DEFAULT_NO)
                 .setStatus(StationConstant.BIND_STATUS_BOUND)
                 .setBindTime(now);
@@ -94,11 +108,36 @@ public class UserStationBindServiceImpl extends ServiceImpl<UserStationBindMappe
     }
 
     @Override
+    public boolean renameBind(String userId, String stationId, String customName) {
+        UserStationBind bind = getBind(userId, stationId);
+        if (ObjectUtil.isEmpty(bind)) {
+            throw new AppException(ExceptionEnum.STATION_NOT_BOUND);
+        }
+        bind.setCustomName(cn.hutool.core.util.StrUtil.isEmpty(customName) ? null : customName.trim());
+        bind.setUpdateTime(DateUtil.date());
+        return this.updateById(bind);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean unbindStation(String userId, String stationId) {
         UserStationBind bind = getBind(userId, stationId);
         if (ObjectUtil.isEmpty(bind)) {
             throw new AppException(ExceptionEnum.STATION_NOT_BOUND);
+        }
+
+        // 默认（第一个）仓库不可删除
+        if (ObjectUtil.defaultIfNull(bind.getIsDefault(), StationConstant.IS_DEFAULT_NO) == StationConstant.IS_DEFAULT_YES) {
+            throw new AppException(ExceptionEnum.STATION_DEFAULT_CANNOT_DELETE);
+        }
+
+        // 仓库下仍有物品时不可删除（移出所有物品后才能删除）
+        long itemCount = itemInfoServiceProvider.getObject().count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<org.jeecg.modules.app.entity.ItemInfo>()
+                .eq(org.jeecg.modules.app.entity.ItemInfo::getUserId, userId)
+                .eq(org.jeecg.modules.app.entity.ItemInfo::getStationId, stationId)
+                .eq(org.jeecg.modules.app.entity.ItemInfo::getStationType, StationConstant.STATION_TYPE_REAL));
+        if (itemCount > 0) {
+            throw new AppException(ExceptionEnum.STATION_NOT_EMPTY);
         }
 
         boolean wasDefault = ObjectUtil.defaultIfNull(bind.getIsDefault(), StationConstant.IS_DEFAULT_NO) == StationConstant.IS_DEFAULT_YES;

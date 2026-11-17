@@ -22,6 +22,11 @@ public class UserStationBindVO implements Serializable {
     @Schema(description = "站点Id")
     private String stationId;
 
+    /**
+     * 用户自定义仓库名（空则展示站点名）
+     */
+    private String customName;
+
     @Schema(description = "是否主站点:0否,1是")
     private Integer isDefault;
 
