@@ -34,8 +34,8 @@ public class AppAuthFilter implements Filter {
         // 获取请求URL
         String url = httpRequest.getRequestURL().toString();
 
-        // 登陆跳过、开放平台接口跳过（开放接口独立 AK/SK 验签）、非app项目跳过
-        if (url.contains("/app/login") || url.contains("/app/open/") || !url.contains("/app/")) {
+        // 登陆跳过、开放平台接口跳过（开放接口独立 AK/SK 验签）、文章（协议需登录前可读）跳过、非app项目跳过
+        if (url.contains("/app/login") || url.contains("/app/open/") || url.contains("/app/article") || !url.contains("/app/")) {
             chain.doFilter(request, response);
             return;
         }

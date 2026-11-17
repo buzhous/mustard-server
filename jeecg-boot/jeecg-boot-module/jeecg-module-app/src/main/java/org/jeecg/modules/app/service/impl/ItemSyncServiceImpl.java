@@ -267,13 +267,18 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
             throw new AppException(ExceptionEnum.INSUFFICIENT_QUANTITY);
         }
 
+        // 同步记录数量更新为扣减后的剩余数量（保持云端物品档案与库存一致）
         ItemSync itemSyncUpdate = new ItemSync();
         itemSyncUpdate.setId(itemSyncExist.getId());
-        itemSyncUpdate.setQuantity(destroyQuantity);
+        itemSyncUpdate.setQuantity(inventoryQuantity - destroyQuantity);
         itemSyncUpdate.setVersion(version);
         this.updateById(itemSyncUpdate);
 
-        return true;
+        // 扣减数量的物品丢入殷墟公海（同一物品多次部分销毁自动累加）
+        ItemSync destroyPart = new ItemSync();
+        BeanUtil.copyProperties(itemSyncExist, destroyPart);
+        destroyPart.setQuantity(destroyQuantity);
+        return itemRuinsService.dropToRuins(destroyPart);
     }
 
     /**

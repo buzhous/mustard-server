@@ -91,6 +91,13 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
             return this.saveOrUpdate(itemRuins);
         } else {
             itemRuins.setStatus(RuinsStatusEnum.NOT_PICKUP.getCode());
+            // 同一物品多次销毁丢入殷墟：未拾取记录累加库存数量
+            if (ruinExist.getStatus() != null
+                    && ruinExist.getStatus() == RuinsStatusEnum.NOT_PICKUP.getCode()
+                    && itemRuins.getQuantity() != null) {
+                int existQuantity = ruinExist.getQuantity() == null ? 0 : ruinExist.getQuantity();
+                itemRuins.setQuantity(existQuantity + itemRuins.getQuantity());
+            }
             return this.updateById(itemRuins);
         }
     }
