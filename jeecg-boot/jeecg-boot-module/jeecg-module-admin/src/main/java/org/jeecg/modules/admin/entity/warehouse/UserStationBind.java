@@ -48,6 +48,10 @@ public class UserStationBind implements Serializable {
     @Schema(description = "站点Id")
     private String stationId;
 
+    @Excel(name = "自定义仓库名", width = 15)
+    @Schema(description = "自定义仓库名")
+    private String customName;
+
     @Excel(name = "是否主站点", width = 15)
     @Schema(description = "是否主站点:0否,1是")
     private Integer isDefault;

@@ -17,7 +17,7 @@ import java.util.Date;
 
 /**
  * 用户仓库（虚拟仓 + 真实个人仓）
- * 物品归属沿用 ItemInfo.stationId/stationType：REAL 仓 stationId=本表 id，stationType=2
+ * 物品归属沿用 ItemInfo.stationId/stationType：自有仓 stationId=本表 id，stationType=3
  */
 @Data
 @TableName("tbl_user_storage")

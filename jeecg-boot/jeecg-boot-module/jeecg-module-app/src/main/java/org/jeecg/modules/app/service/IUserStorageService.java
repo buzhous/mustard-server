@@ -21,6 +21,13 @@ public interface IUserStorageService extends IService<UserStorage> {
     List<UserStorageVO> listUserStorages(String userId);
 
     /**
+     * 当前用户自有真实仓列表（不含系统虚拟仓，按创建时间正序）
+     *
+     * @param userId 用户Id
+     */
+    List<UserStorageVO> listRealStorages(String userId);
+
+    /**
      * 创建真实个人仓（普通用户上限 1 个，VIP 上限 3 个）
      *
      * @param userId 用户Id

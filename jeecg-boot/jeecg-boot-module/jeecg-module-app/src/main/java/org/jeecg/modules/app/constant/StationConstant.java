@@ -58,6 +58,11 @@ public class StationConstant {
     public static final int STATION_TYPE_REAL = 2;
 
     /**
+     * 仓位类型-用户自有仓（个人真实仓 tbl_user_storage）
+     */
+    public static final int STATION_TYPE_STORAGE = 3;
+
+    /**
      * 虚拟仓默认位置说明
      */
     public static final String DEFAULT_VIRTUAL_LOCATION_DESC = "芥子空间平台 OSS 仓库";

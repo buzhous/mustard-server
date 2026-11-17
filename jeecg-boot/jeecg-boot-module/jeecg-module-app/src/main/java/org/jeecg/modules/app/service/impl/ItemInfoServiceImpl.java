@@ -15,10 +15,12 @@ import org.jeecg.modules.app.bean.vo.item.ItemInfoQueryVO;
 import org.jeecg.modules.app.constant.StationConstant;
 import org.jeecg.modules.app.entity.ItemInfo;
 import org.jeecg.modules.app.entity.warehouse.UserStationBind;
+import org.jeecg.modules.app.entity.warehouse.UserStorage;
 import org.jeecg.modules.app.entity.warehouse.UserVirtualStation;
 import org.jeecg.modules.app.mapper.ItemInfoMapper;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IUserStationBindService;
+import org.jeecg.modules.app.service.IUserStorageService;
 import org.jeecg.modules.app.service.IUserVirtualStationService;
 import org.jeecg.modules.app.utils.FieldElementUtil;
 import org.springframework.stereotype.Service;
@@ -31,11 +33,14 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
 
     private final IUserStationBindService userStationBindService;
     private final IUserVirtualStationService userVirtualStationService;
+    private final IUserStorageService userStorageService;
 
     public ItemInfoServiceImpl(IUserStationBindService userStationBindService,
-                               IUserVirtualStationService userVirtualStationService) {
+                               IUserVirtualStationService userVirtualStationService,
+                               IUserStorageService userStorageService) {
         this.userStationBindService = userStationBindService;
         this.userVirtualStationService = userVirtualStationService;
+        this.userStorageService = userStorageService;
     }
 
     /**
@@ -69,7 +74,7 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
     }
 
     /**
-     * 校验仓位归属：真实仓须为本人已绑定站点，虚拟仓须为本人虚拟仓
+     * 校验仓位归属：官方绑定仓须为本人已绑定站点，虚拟仓须为本人虚拟仓，自有仓须为本人未删除仓库
      */
     private void validateStationOwnership(String userId, String stationId, Integer stationType) {
         if (StationConstant.STATION_TYPE_REAL == stationType) {
@@ -84,6 +89,12 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         } else if (StationConstant.STATION_TYPE_VIRTUAL == stationType) {
             UserVirtualStation virtual = userVirtualStationService.getById(stationId);
             if (ObjectUtil.isEmpty(virtual) || !userId.equals(virtual.getUserId())) {
+                throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
+            }
+        } else if (StationConstant.STATION_TYPE_STORAGE == stationType) {
+            UserStorage storage = userStorageService.getById(stationId);
+            // @TableLogic 自动过滤已删除记录
+            if (ObjectUtil.isEmpty(storage) || !userId.equals(storage.getUserId())) {
                 throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
             }
         } else {

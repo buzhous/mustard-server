@@ -1,5 +1,6 @@
 package org.jeecg.modules.app.service.impl;
 
+import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -7,8 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.storage.UserStorageVO;
+import org.jeecg.modules.app.constant.StationConstant;
 import org.jeecg.modules.app.constant.VipStorageConstant;
+import org.jeecg.modules.app.entity.ItemInfo;
 import org.jeecg.modules.app.entity.warehouse.UserStorage;
+import org.jeecg.modules.app.mapper.ItemInfoMapper;
 import org.jeecg.modules.app.mapper.UserStorageMapper;
 import org.jeecg.modules.app.service.IUserStorageService;
 import org.jeecg.modules.app.service.IVipOrderService;
@@ -22,8 +26,8 @@ import java.util.List;
 /**
  * 用户仓库服务实现
  * 虚拟仓为系统内置（不落库，列表兜底返回 id=-1）；真实个人仓落库 tbl_user_storage
- * 物品归属沿用 ItemInfo/ItemSync 的 stationId/stationType：REAL 仓 stationId=仓库id、stationType=2(真实仓)，
- * 虚拟仓关联沿用既有 UserVirtualStation(stationType=1)，物品表无需改动
+ * 物品归属沿用 ItemInfo/ItemSync 的 stationId/stationType：自有仓 stationId=仓库id、stationType=3(STATION_TYPE_STORAGE)，
+ * 虚拟仓关联沿用既有 UserVirtualStation(stationType=1)，官方绑定站点仓 stationType=2，物品表无需改动
  *
  * @author elinx
  */
@@ -34,6 +38,10 @@ public class UserStorageServiceImpl extends ServiceImpl<UserStorageMapper, UserS
     @Autowired
     private IVipOrderService vipOrderService;
 
+    // 直接注入 mapper 统计物品数，避免 IItemInfoService 服务间循环依赖
+    @Autowired
+    private ItemInfoMapper itemInfoMapper;
+
     @Override
     public List<UserStorageVO> listUserStorages(String userId) {
         List<UserStorageVO> result = new ArrayList<>();
@@ -43,10 +51,18 @@ public class UserStorageServiceImpl extends ServiceImpl<UserStorageMapper, UserS
                 .setName(VipStorageConstant.BUILTIN_VIRTUAL_STORAGE_NAME)
                 .setStorageType(VipStorageConstant.STORAGE_TYPE_VIRTUAL)
                 .setIsDefault(1));
+        result.addAll(listRealStorages(userId));
+        return result;
+    }
+
+    @Override
+    public List<UserStorageVO> listRealStorages(String userId) {
         List<UserStorage> storages = baseMapper.selectList(new LambdaQueryWrapper<UserStorage>()
                 .eq(UserStorage::getUserId, userId)
+                .eq(UserStorage::getStorageType, VipStorageConstant.STORAGE_TYPE_REAL)
                 .eq(UserStorage::getDeleted, 0)
                 .orderByAsc(UserStorage::getCreateTime));
+        List<UserStorageVO> result = new ArrayList<>();
         for (UserStorage storage : storages) {
             result.add(new UserStorageVO()
                     .setId(storage.getId())
@@ -103,7 +119,19 @@ public class UserStorageServiceImpl extends ServiceImpl<UserStorageMapper, UserS
         if (StrUtil.isEmpty(userId) || StrUtil.isEmpty(id)) {
             throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
         }
-        getOwnedRealStorage(userId, id);
+        UserStorage storage = getOwnedRealStorage(userId, id);
+        // 默认（首个创建）仓库不可删除
+        if (ObjectUtil.defaultIfNull(storage.getIsDefault(), 0) == 1) {
+            throw new AppException(ExceptionEnum.STORAGE_DEFAULT_CANNOT_DELETE);
+        }
+        // 仓库下仍有物品时不可删除（移出所有物品后才能删除）
+        long itemCount = itemInfoMapper.selectCount(new LambdaQueryWrapper<ItemInfo>()
+                .eq(ItemInfo::getUserId, userId)
+                .eq(ItemInfo::getStationId, id)
+                .eq(ItemInfo::getStationType, StationConstant.STATION_TYPE_STORAGE));
+        if (itemCount > 0) {
+            throw new AppException(ExceptionEnum.STORAGE_NOT_EMPTY);
+        }
         // 软删：deleted=1（@TableLogic 自动转 update）
         return baseMapper.deleteById(id) > 0;
     }

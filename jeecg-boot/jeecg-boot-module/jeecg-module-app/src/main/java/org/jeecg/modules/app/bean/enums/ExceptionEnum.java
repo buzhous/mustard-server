@@ -67,6 +67,8 @@ public enum ExceptionEnum {
     // 仓库删除 10740-10750
     STATION_DEFAULT_CANNOT_DELETE(10740, "默认仓库不可删除，请先将其他仓库设为默认仓"),
     STATION_NOT_EMPTY(10741, "仓库下仍有物品，移出所有物品后才能删除"),
+    STORAGE_DEFAULT_CANNOT_DELETE(10742, "默认仓库不可删除"),
+    STORAGE_NOT_EMPTY(10743, "仓库下仍有物品，移出所有物品后才能删除"),
     // 通用业务错误 11000-12000
     DATA_UPDATE_ERROR(11000, "更新失败"),
     DATA_DELETE_ERROR(11001, "删除失败"),

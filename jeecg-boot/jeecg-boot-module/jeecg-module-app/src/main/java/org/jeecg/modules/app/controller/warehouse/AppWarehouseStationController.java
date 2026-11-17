@@ -16,6 +16,7 @@ import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.entity.warehouse.UserVirtualStation;
 import org.jeecg.modules.app.service.IUserRealStationService;
 import org.jeecg.modules.app.service.IUserStationBindService;
+import org.jeecg.modules.app.service.IUserStorageService;
 import org.jeecg.modules.app.service.IUserVirtualStationService;
 import org.jeecg.modules.app.service.IWarehouseStationService;
 import org.jeecg.modules.app.utils.AppAuthUtil;
@@ -45,6 +46,9 @@ public class AppWarehouseStationController {
 
     @Autowired
     private IUserRealStationService userRealStationService;
+
+    @Autowired
+    private IUserStorageService userStorageService;
 
     @Operation(summary = "我的默认真实仓详情（不存在时自动创建）")
     @GetMapping("/real")
@@ -99,7 +103,7 @@ public class AppWarehouseStationController {
         return Result.OK(userStationBindService.listMyStations(loginUser.getId()));
     }
 
-    @Operation(summary = "我的仓库点位聚合（虚拟仓固定1个 + 真实绑定站点列表）")
+    @Operation(summary = "我的仓库点位聚合（虚拟仓固定1个 + 自有真实仓列表 + 官方绑定站点列表）")
     @GetMapping("/myStations")
     public Result<MyStationsVO> myStations() {
         AppUser loginUser = AppAuthUtil.getUserInfo();
@@ -114,7 +118,8 @@ public class AppWarehouseStationController {
                 .setCustomName(virtual.getCustomName());
         MyStationsVO vo = new MyStationsVO()
                 .setVirtual(virtualVO)
-                .setReal(userStationBindService.listMyStations(loginUser.getId()));
+                .setReal(userStationBindService.listMyStations(loginUser.getId()))
+                .setStorages(userStorageService.listRealStorages(loginUser.getId()));
         return Result.OK(vo);
     }
 
