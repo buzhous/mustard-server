@@ -34,7 +34,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 用户仓库查看 后台管理（只读：虚拟仓 + 自有仓 + 官方绑定仓）
+ * 用户仓库查看 后台管理（只读：虚拟仓 + 自建真实仓 + 官方绑定仓）
  */
 @Slf4j
 @RestController
@@ -57,7 +57,7 @@ public class UserWarehouseAdminController {
     @Autowired
     private IUserStationBindAdminService userStationBindService;
 
-    @Operation(summary = "自有仓分页列表（userKey支持手机号/用户名/用户Id）")
+    @Operation(summary = "自建真实仓分页列表（userKey支持手机号/用户名/用户Id）")
     @GetMapping(value = "/page")
     public Result<?> page(UserStorage userStorage,
                           @RequestParam(name = "userKey", required = false) String userKey,
@@ -79,7 +79,7 @@ public class UserWarehouseAdminController {
         return Result.ok(pageList);
     }
 
-    @Operation(summary = "用户仓库详情（虚拟仓 + 自有仓 + 官方绑定仓，userKey支持手机号/用户名/用户Id）")
+    @Operation(summary = "用户仓库详情（虚拟仓 + 自建真实仓 + 官方绑定仓，userKey支持手机号/用户名/用户Id）")
     @GetMapping(value = "/detail")
     public Result<?> detail(@RequestParam(name = "userKey") String userKey) {
         if (StrUtil.isBlank(userKey)) {
@@ -155,7 +155,7 @@ public class UserWarehouseAdminController {
         records.forEach(r -> {
             Map<String, Object> user = userMap.get(r.getUserId());
             if (user != null) {
-                r.setPhone(user.get("phone") == null ? "" : String.valueOf(user.get("phone")));
+                r.setUserPhone(user.get("phone") == null ? "" : String.valueOf(user.get("phone")));
                 r.setNickname(user.get("nickname") == null ? "" : String.valueOf(user.get("nickname")));
             }
         });

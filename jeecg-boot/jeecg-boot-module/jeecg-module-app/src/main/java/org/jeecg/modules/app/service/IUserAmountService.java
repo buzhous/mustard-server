@@ -11,4 +11,9 @@ public interface IUserAmountService extends IService<UserAmount> {
 
     boolean createUserAmount(AppUser appUser);
 
+    /**
+     * 原子增加金币（积分）并记录积分流水，返回变动后的最新余额，失败返回 null
+     */
+    Integer addGoldCoin(String userId, int points, int flowType, String remark, String refId);
+
 }

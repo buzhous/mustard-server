@@ -32,9 +32,9 @@ public class AppInitServiceImpl extends ServiceImpl<AppUserMapper, AppUser> impl
         // 初始化资金账户 START ///
         UserAmount userAmount = iUserAmountService.queryByUserId(loginUser.getId());
         if (ObjectUtil.isEmpty(userAmount)) {
-            // TODO 创建用户账户
-            //iUserAmountService.createUserAmount(loginUser);
-            //userAmount = iUserAmountService.queryByUserId(loginUser.getId());
+            // 老用户补建资金账户（赠送注册积分）
+            iUserAmountService.createUserAmount(loginUser);
+            userAmount = iUserAmountService.queryByUserId(loginUser.getId());
         }
         return userAmount;
     }

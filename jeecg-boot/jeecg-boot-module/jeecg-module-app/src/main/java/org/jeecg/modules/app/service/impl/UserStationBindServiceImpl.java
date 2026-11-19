@@ -155,30 +155,6 @@ public class UserStationBindServiceImpl extends ServiceImpl<UserStationBindMappe
         return result;
     }
 
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public boolean setDefaultStation(String userId, String stationId) {
-        UserStationBind bind = getBind(userId, stationId);
-        if (ObjectUtil.isEmpty(bind)) {
-            throw new AppException(ExceptionEnum.STATION_NOT_BOUND);
-        }
-        if (ObjectUtil.defaultIfNull(bind.getIsDefault(), StationConstant.IS_DEFAULT_NO) == StationConstant.IS_DEFAULT_YES) {
-            return true;
-        }
-        // 先清空原主站点
-        UserStationBind clear = new UserStationBind()
-                .setIsDefault(StationConstant.IS_DEFAULT_NO)
-                .setUpdateTime(DateUtil.date());
-        this.update(clear, new LambdaQueryWrapper<UserStationBind>()
-                .eq(UserStationBind::getUserId, userId)
-                .eq(UserStationBind::getStatus, StationConstant.BIND_STATUS_BOUND)
-                .eq(UserStationBind::getIsDefault, StationConstant.IS_DEFAULT_YES));
-
-        bind.setIsDefault(StationConstant.IS_DEFAULT_YES);
-        bind.setUpdateTime(DateUtil.date());
-        return this.updateById(bind);
-    }
-
     private List<UserStationBind> listBinds(String userId) {
         return this.list(new LambdaQueryWrapper<UserStationBind>()
                 .eq(UserStationBind::getUserId, userId)

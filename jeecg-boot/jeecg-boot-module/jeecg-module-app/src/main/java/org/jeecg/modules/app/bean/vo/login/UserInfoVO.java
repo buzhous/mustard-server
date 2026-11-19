@@ -59,5 +59,8 @@ public class UserInfoVO implements Serializable {
     @Schema(description = "国家")
     private String country;
 
+    @Schema(description = "积分")
+    private Integer points;
+
 }
 

@@ -71,6 +71,14 @@ public interface IItemSyncService extends IService<ItemSync> {
     boolean syncDestroy(ItemSyncReqVO syncVO);
 
     /**
+     * 物品删除（进本人独立回收站，与殷墟隔离，不进公海）
+     *
+     * @param syncVO 物品同步记录VO
+     * @return 是否删除成功
+     */
+    boolean syncDelete(ItemSyncReqVO syncVO);
+
+    /**
      * 根据itemId+oriId+userId查询物品同步记录
      *
      * @param itemId 物品ID

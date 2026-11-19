@@ -13,11 +13,12 @@ import org.springframework.format.annotation.DateTimeFormat;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.math.BigDecimal;
 import java.util.Date;
 
 /**
- * 用户仓库（虚拟仓 + 真实个人仓）
- * 物品归属沿用 ItemInfo.stationId/stationType：自有仓 stationId=本表 id，stationType=3
+ * 用户仓库（虚拟仓 + 真实仓）
+ * 物品归属沿用 ItemInfo.stationId/stationType：用户自建真实仓 stationId=本表 id，stationType=3
  */
 @Data
 @TableName("tbl_user_storage")
@@ -36,6 +37,9 @@ public class UserStorage implements Serializable {
     @Schema(description = "用户Id")
     private String userId;
 
+    @Schema(description = "仓库编号(US + 仓库Id末6位)")
+    private String stationNo;
+
     @Schema(description = "仓库名称")
     private String name;
 
@@ -44,6 +48,30 @@ public class UserStorage implements Serializable {
 
     @Schema(description = "是否默认仓:0否,1是")
     private Integer isDefault;
+
+    @Schema(description = "收件人")
+    private String receiverName;
+
+    @Schema(description = "联系电话")
+    private String phone;
+
+    @Schema(description = "省")
+    private String province;
+
+    @Schema(description = "市")
+    private String city;
+
+    @Schema(description = "区")
+    private String district;
+
+    @Schema(description = "详细地址")
+    private String address;
+
+    @Schema(description = "经度")
+    private BigDecimal longitude;
+
+    @Schema(description = "纬度")
+    private BigDecimal latitude;
 
     @Schema(description = "是否删除:0否,1是")
     @TableLogic

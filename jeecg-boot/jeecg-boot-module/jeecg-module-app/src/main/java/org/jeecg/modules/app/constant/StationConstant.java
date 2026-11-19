@@ -58,7 +58,7 @@ public class StationConstant {
     public static final int STATION_TYPE_REAL = 2;
 
     /**
-     * 仓位类型-用户自有仓（个人真实仓 tbl_user_storage）
+     * 仓位类型-自建真实仓（tbl_user_storage，字段与真实仓编辑页一致）
      */
     public static final int STATION_TYPE_STORAGE = 3;
 
@@ -82,17 +82,17 @@ public class StationConstant {
     }
 
     /**
-     * 用户默认真实仓编号前缀
+     * 用户真实仓编号前缀（默认仓 + VIP 追加仓统一使用，每条仓库唯一）
      */
-    public static final String REAL_STATION_NO_PREFIX = "RS";
+    public static final String STORAGE_NO_PREFIX = "RS";
 
     /**
-     * 生成用户默认真实仓编号：RS + 用户Id 末 6 位（不足补齐），与用户固定关联
+     * 生成用户真实仓编号：RS + 仓库Id 末 6 位（不足补齐），每条仓库唯一
      */
-    public static String buildRealStationNo(String userId) {
-        String tail = userId == null ? "000000" : userId;
+    public static String buildStorageStationNo(String storageId) {
+        String tail = storageId == null ? "000000" : storageId;
         tail = tail.length() >= 6 ? tail.substring(tail.length() - 6) : String.format("%06d", Math.abs(tail.hashCode()) % 1000000);
-        return REAL_STATION_NO_PREFIX + tail;
+        return STORAGE_NO_PREFIX + tail;
     }
 
 }

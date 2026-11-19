@@ -8,6 +8,7 @@ public enum SyncOpsEnum {
     ADD("add", "新增"),
     EDIT("edit", "修改"),
     DESTROY("destroy", "已销毁"),
+    DELETE("delete", "已删除"),
     DEFAULT("default", "默认"),
     ;
     private String code;

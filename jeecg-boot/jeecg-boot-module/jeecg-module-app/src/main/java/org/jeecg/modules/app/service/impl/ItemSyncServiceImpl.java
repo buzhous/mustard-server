@@ -20,6 +20,7 @@ import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.ItemUserInventory;
 import org.jeecg.modules.app.mapper.ItemSyncMapper;
 import org.jeecg.modules.app.service.IItemInfoService;
+import org.jeecg.modules.app.service.IItemRecycleService;
 import org.jeecg.modules.app.service.IItemRuinsService;
 import org.jeecg.modules.app.service.IItemSyncService;
 import org.jeecg.modules.app.service.IItemUserInventoryService;
@@ -45,6 +46,10 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Lazy
     @Autowired
     IItemInfoService itemInfoService;
+
+    @Lazy
+    @Autowired
+    IItemRecycleService itemRecycleService;
 
     // 根据itemId查询物品同步记录方法
     @Override
@@ -222,6 +227,20 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean syncDestroy(ItemSyncReqVO syncVO) {
+        return doDestroy(syncVO, false);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean syncDelete(ItemSyncReqVO syncVO) {
+        return doDestroy(syncVO, true);
+    }
+
+    /**
+     * 销毁/删除共用流程：库存校验、全量或部分扣减；
+     * toRecycle=true 时落入本人独立回收站（不进殷墟公海），false 时掉落殷墟
+     */
+    private boolean doDestroy(ItemSyncReqVO syncVO, boolean toRecycle) {
         ItemSync itemSyncExist = validateAndGetItemSync(syncVO);
 
         ItemUserInventory inventory = itemUserInventoryService.queryUserItem(syncVO.getUserId(), syncVO.getItemId());
@@ -232,10 +251,10 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         int inventoryQuantity = ObjectUtil.isEmpty(inventory.getQuantity()) ? 0 : inventory.getQuantity();
         int destroyQuantity = ObjectUtil.isEmpty(syncVO.getQuantity()) ? inventoryQuantity : syncVO.getQuantity();
 
-        // 库存已清零时销毁视为幂等完成：直接标记销毁并掉落废墟，
+        // 库存已清零时销毁视为幂等完成：直接标记销毁并掉落废墟/回收站，
         // 避免同步队列重试时反复报“物品数量不足”卡死队列
         if (inventoryQuantity == 0) {
-            return destroyItemCompletely(itemSyncExist, syncVO.getVersion());
+            return destroyItemCompletely(itemSyncExist, syncVO.getVersion(), toRecycle);
         }
 
         if (destroyQuantity > inventoryQuantity) {
@@ -243,24 +262,24 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         }
 
         if (destroyQuantity >= inventoryQuantity) {
-            return destroyItemCompletely(itemSyncExist, syncVO.getVersion());
+            return destroyItemCompletely(itemSyncExist, syncVO.getVersion(), toRecycle);
         } else {
-            return destroyPartialQuantity(itemSyncExist, inventory, inventoryQuantity, destroyQuantity, syncVO.getVersion());
+            return destroyPartialQuantity(itemSyncExist, inventory, inventoryQuantity, destroyQuantity, syncVO.getVersion(), toRecycle);
         }
     }
 
-    private boolean destroyItemCompletely(ItemSync itemSyncExist, Integer version) {
+    private boolean destroyItemCompletely(ItemSync itemSyncExist, Integer version, boolean toRecycle) {
         // 条件原子更新：仅未销毁状态可翻转，防止重复销毁并发覆盖
         int rows = this.baseMapper.markDestroyedIfNot(itemSyncExist.getId(), SyncStatusEnum.DESTROYED.getCode(), version);
         if (rows == 0) {
             throw new AppException(ExceptionEnum.ITEM_DESTROYED);
         }
 
-        return itemRuinsService.dropToRuins(itemSyncExist);
+        return toRecycle ? itemRecycleService.dropToRecycle(itemSyncExist) : itemRuinsService.dropToRuins(itemSyncExist);
     }
 
     private boolean destroyPartialQuantity(ItemSync itemSyncExist, ItemUserInventory inventory,
-                                           int inventoryQuantity, int destroyQuantity, Integer version) {
+                                           int inventoryQuantity, int destroyQuantity, Integer version, boolean toRecycle) {
         // 条件原子扣减库存数量：quantity = quantity - ? WHERE id = ? AND quantity >= ?
         int rows = itemUserInventoryService.decreaseQuantityIfEnough(inventory.getId(), destroyQuantity);
         if (rows == 0) {
@@ -274,11 +293,12 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         itemSyncUpdate.setVersion(version);
         this.updateById(itemSyncUpdate);
 
-        // 扣减数量的物品丢入殷墟公海（同一物品多次部分销毁自动累加）
+        // 扣减数量的物品掉入殷墟公海（同一物品多次部分销毁自动累加）
+        // 或进入本人独立回收站（每条删除独立成记录）
         ItemSync destroyPart = new ItemSync();
         BeanUtil.copyProperties(itemSyncExist, destroyPart);
         destroyPart.setQuantity(destroyQuantity);
-        return itemRuinsService.dropToRuins(destroyPart);
+        return toRecycle ? itemRecycleService.dropToRecycle(destroyPart) : itemRuinsService.dropToRuins(destroyPart);
     }
 
     /**
@@ -450,6 +470,7 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
                     case ADD -> syncUploadAdd(itemVO);
                     case EDIT -> syncUploadEdit(itemVO);
                     case DESTROY -> syncDestroy(itemVO);
+                    case DELETE -> syncDelete(itemVO);
                     case DEFAULT -> false;
                 };
 

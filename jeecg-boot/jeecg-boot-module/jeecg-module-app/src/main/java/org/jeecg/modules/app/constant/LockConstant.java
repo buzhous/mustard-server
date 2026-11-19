@@ -22,4 +22,9 @@ public class LockConstant {
      */
     public static final String COUPON_CLAIM_DAILY_LOCK = "lock_coupon_claim_daily:";
 
+    /**
+     * 回收站恢复/彻底删除互斥锁（防止并发双重恢复或双重删除）
+     */
+    public static final String ITEM_RECYCLE_LOCK = "lock_item_recycle:";
+
 }

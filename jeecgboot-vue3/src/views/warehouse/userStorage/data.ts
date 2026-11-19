@@ -5,7 +5,7 @@ import { BasicColumn, FormSchema } from '/@/components/Table';
 export const columns: BasicColumn[] = [
   {
     title: '手机号',
-    dataIndex: 'phone',
+    dataIndex: 'userPhone',
     width: 130,
   },
   {

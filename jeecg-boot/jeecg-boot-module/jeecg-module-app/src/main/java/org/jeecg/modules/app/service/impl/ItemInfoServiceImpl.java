@@ -74,7 +74,7 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
     }
 
     /**
-     * 校验仓位归属：官方绑定仓须为本人已绑定站点，虚拟仓须为本人虚拟仓，自有仓须为本人未删除仓库
+     * 校验仓位归属：官方绑定仓须为本人已绑定站点，虚拟仓须为本人虚拟仓，自建真实仓须为本人未删除仓库
      */
     private void validateStationOwnership(String userId, String stationId, Integer stationType) {
         if (StationConstant.STATION_TYPE_REAL == stationType) {

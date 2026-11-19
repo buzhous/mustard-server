@@ -133,6 +133,12 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
                     return Result.error("同步销毁失败！");
                 }
                 break;
+            case DELETE:
+                result = itemSyncService.syncDelete(syncReqVO);
+                if (!result) {
+                    return Result.error("同步删除失败！");
+                }
+                break;
             default:
                 return Result.error("错误的操作类型！");
         }

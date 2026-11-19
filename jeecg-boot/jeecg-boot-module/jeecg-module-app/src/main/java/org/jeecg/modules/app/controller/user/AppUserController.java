@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.base.controller.JeecgController;
 import org.jeecg.modules.app.entity.user.AppUser;
+import org.jeecg.modules.app.entity.UserAmount;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.login.ForgetPasswordVO;
@@ -26,6 +27,9 @@ public class AppUserController extends JeecgController<AppUser, IAppUserService>
     @Autowired
     private IAppUserService iAppUserService;
 
+    @Autowired
+    private org.jeecg.modules.app.service.IUserAmountService iUserAmountService;
+
     @Operation(summary = "获取用户信息")
     @GetMapping(value = "/info")
     public Result<UserInfoVO> info(HttpServletRequest request) {
@@ -38,6 +42,13 @@ public class AppUserController extends JeecgController<AppUser, IAppUserService>
             throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
         UserInfoVO userVO = JSONUtil.toBean(JSONUtil.toJsonStr(appUser), UserInfoVO.class);
+        // 附带积分余额
+        UserAmount userAmount = iUserAmountService.queryByUserId(loginUser.getId());
+        if (ObjectUtil.isEmpty(userAmount)) {
+            iUserAmountService.createUserAmount(loginUser);
+            userAmount = iUserAmountService.queryByUserId(loginUser.getId());
+        }
+        userVO.setPoints(userAmount == null || userAmount.getGoldCoinAmount() == null ? 0 : userAmount.getGoldCoinAmount());
         return Result.OK("", userVO);
     }
 

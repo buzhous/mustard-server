@@ -2,33 +2,40 @@ package org.jeecg.modules.app.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.date.DateUtil;
+import cn.hutool.core.util.ObjectUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.jeecg.boot.starter.lock.annotation.JLock;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.enums.RuinsStatusEnum;
+import org.jeecg.modules.app.bean.enums.SyncStatusEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.queue.ItemSyncReqVO;
 import org.jeecg.modules.app.bean.vo.ruins.ItemRuinsListVO;
 import org.jeecg.modules.app.constant.LockConstant;
 import org.jeecg.modules.app.entity.ItemRuins;
 import org.jeecg.modules.app.entity.ItemSync;
+import org.jeecg.modules.app.entity.ItemUserInventory;
 import org.jeecg.modules.app.entity.UserCoupon;
 import org.jeecg.modules.app.mapper.ItemRuinsMapper;
 import org.jeecg.modules.app.service.IItemRuinsService;
 import org.jeecg.modules.app.service.IItemSyncService;
+import org.jeecg.modules.app.service.IItemUserInventoryService;
 import org.jeecg.modules.app.service.IUserCouponService;
 import org.jeecg.modules.app.utils.FieldElementUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
 
+@Slf4j
 @Service
 public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins> implements IItemRuinsService {
 
@@ -37,6 +44,9 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
 
     @Autowired
     IUserCouponService userCouponService;
+
+    @Autowired
+    IItemUserInventoryService itemUserInventoryService;
 
     @Override
     public IPage<ItemRuinsListVO> queryNotPickupRuinsPage(Integer page, Integer size, String userId) {

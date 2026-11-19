@@ -8,13 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.vo.station.MyStationsVO;
-import org.jeecg.modules.app.bean.vo.station.UserRealStationVO;
 import org.jeecg.modules.app.bean.vo.station.UserStationBindVO;
 import org.jeecg.modules.app.bean.vo.station.UserVirtualStationVO;
 import org.jeecg.modules.app.bean.vo.station.WarehouseStationVO;
 import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.entity.warehouse.UserVirtualStation;
-import org.jeecg.modules.app.service.IUserRealStationService;
 import org.jeecg.modules.app.service.IUserStationBindService;
 import org.jeecg.modules.app.service.IUserStorageService;
 import org.jeecg.modules.app.service.IUserVirtualStationService;
@@ -45,33 +43,7 @@ public class AppWarehouseStationController {
     private IUserVirtualStationService userVirtualStationService;
 
     @Autowired
-    private IUserRealStationService userRealStationService;
-
-    @Autowired
     private IUserStorageService userStorageService;
-
-    @Operation(summary = "我的默认真实仓详情（不存在时自动创建）")
-    @GetMapping("/real")
-    public Result<UserRealStationVO> realDetail() {
-        AppUser loginUser = AppAuthUtil.getUserInfo();
-        if (ObjectUtil.isEmpty(loginUser)) {
-            return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
-        }
-        return Result.OK(userRealStationService.getDetailByUser(loginUser.getId()));
-    }
-
-    @Operation(summary = "更新默认真实仓（收件人/电话/省市区/详细地址/定位）")
-    @PostMapping("/real/update")
-    public Result<UserRealStationVO> realUpdate(@RequestBody UserRealStationVO vo) {
-        AppUser loginUser = AppAuthUtil.getUserInfo();
-        if (ObjectUtil.isEmpty(loginUser)) {
-            return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
-        }
-        if (ObjectUtil.isEmpty(vo)) {
-            return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
-        }
-        return Result.OK(userRealStationService.updateByUser(loginUser.getId(), vo));
-    }
 
     @Operation(summary = "平台站点列表（按城市/关键词筛选）")
     @GetMapping("/list")
@@ -103,7 +75,7 @@ public class AppWarehouseStationController {
         return Result.OK(userStationBindService.listMyStations(loginUser.getId()));
     }
 
-    @Operation(summary = "我的仓库点位聚合（虚拟仓固定1个 + 自有真实仓列表 + 官方绑定站点列表）")
+    @Operation(summary = "我的仓库点位聚合（用户虚拟仓固定1个 + 用户真实仓列表 + 官方绑定站点列表）")
     @GetMapping("/myStations")
     public Result<MyStationsVO> myStations() {
         AppUser loginUser = AppAuthUtil.getUserInfo();
@@ -196,19 +168,5 @@ public class AppWarehouseStationController {
         }
         userStationBindService.unbindStation(loginUser.getId(), stationId);
         return Result.OK("解绑成功", stationId);
-    }
-
-    @Operation(summary = "设置主站点")
-    @PostMapping("/setDefault")
-    public Result<String> setDefault(@RequestParam(name = "stationId") String stationId) {
-        AppUser loginUser = AppAuthUtil.getUserInfo();
-        if (ObjectUtil.isEmpty(loginUser)) {
-            return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
-        }
-        if (ObjectUtil.isEmpty(stationId)) {
-            return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
-        }
-        userStationBindService.setDefaultStation(loginUser.getId(), stationId);
-        return Result.OK("设置成功", stationId);
     }
 }

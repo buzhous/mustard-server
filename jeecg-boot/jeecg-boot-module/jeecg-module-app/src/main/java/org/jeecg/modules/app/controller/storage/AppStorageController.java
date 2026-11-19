@@ -1,5 +1,6 @@
 package org.jeecg.modules.app.controller.storage;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjectUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -46,7 +47,7 @@ public class AppStorageController {
         return Result.OK(userStorageService.listUserStorages(loginUser.getId()));
     }
 
-    @Operation(summary = "创建真实个人仓(非VIP上限1个,VIP上限3个)")
+    @Operation(summary = "创建真实仓(非VIP上限1个,VIP上限3个,字段与真实仓编辑页一致)")
     @PostMapping(value = "/create")
     public Result<UserStorageVO> create(@RequestBody StorageCreateReqVO reqVO) {
         AppUser loginUser = AppAuthUtil.getUserInfo();
@@ -57,31 +58,30 @@ public class AppStorageController {
             return Result.error("请求参数错误");
         }
         try {
-            UserStorage storage = userStorageService.createStorage(loginUser.getId(), reqVO.getName());
-            return Result.OK(new UserStorageVO()
-                    .setId(storage.getId())
-                    .setName(storage.getName())
-                    .setStorageType(storage.getStorageType())
-                    .setIsDefault(storage.getIsDefault())
-                    .setCreateTime(storage.getCreateTime()));
+            UserStorage storage = new UserStorage();
+            BeanUtil.copyProperties(reqVO, storage);
+            UserStorage saved = userStorageService.createStorage(loginUser.getId(), storage);
+            return Result.OK(BeanUtil.copyProperties(saved, UserStorageVO.class));
         } catch (AppException e) {
             return Result.error(e.getMsg());
         }
     }
 
-    @Operation(summary = "重命名仓库(仅真实仓)")
+    @Operation(summary = "编辑仓库(仓名/收件信息/位置,仓名空则保留原名,仅真实仓)")
     @PostMapping(value = "/rename")
     public Result<String> rename(@RequestBody StorageRenameReqVO reqVO) {
         AppUser loginUser = AppAuthUtil.getUserInfo();
         if (ObjectUtil.isEmpty(loginUser)) {
             return Result.error("用户信息错误！");
         }
-        if (reqVO == null || ObjectUtil.isEmpty(reqVO.getId()) || ObjectUtil.isEmpty(reqVO.getName())) {
+        if (reqVO == null || ObjectUtil.isEmpty(reqVO.getId())) {
             return Result.error("请求参数错误");
         }
         try {
-            userStorageService.renameStorage(loginUser.getId(), reqVO.getId(), reqVO.getName());
-            return Result.OK("重命名成功");
+            UserStorage storage = new UserStorage();
+            BeanUtil.copyProperties(reqVO, storage);
+            userStorageService.updateStorage(loginUser.getId(), storage);
+            return Result.OK("保存成功");
         } catch (AppException e) {
             return Result.error(e.getMsg());
         }

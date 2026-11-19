@@ -13,7 +13,7 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 用户仓库查看 VO（虚拟仓 + 自有仓 + 官方绑定仓）
+ * 用户仓库查看 VO（虚拟仓 + 自建真实仓 + 官方绑定仓）
  */
 @Data
 @Accessors(chain = true)

@@ -27,9 +27,4 @@ public interface IUserStationBindService extends IService<UserStationBind> {
      * 解绑站点（解绑主站点后自动将最早绑定的剩余站点设为主站点）
      */
     boolean unbindStation(String userId, String stationId);
-
-    /**
-     * 设置主站点（须为已绑定站点）
-     */
-    boolean setDefaultStation(String userId, String stationId);
 }

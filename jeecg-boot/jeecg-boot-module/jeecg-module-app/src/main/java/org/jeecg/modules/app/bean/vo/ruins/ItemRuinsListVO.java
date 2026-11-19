@@ -8,6 +8,7 @@ import org.jeecg.modules.app.bean.vo.fields.ElementTagVO;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Date;
 import java.util.List;
 
 @Data
@@ -57,5 +58,8 @@ public class ItemRuinsListVO implements Serializable {
 
     @Schema(description = "状态")
     private Integer status;
+
+    @Schema(description = "删除时间（回收站用）")
+    private Date createTime;
 
 }

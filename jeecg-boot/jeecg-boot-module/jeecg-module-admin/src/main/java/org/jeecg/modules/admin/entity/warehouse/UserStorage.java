@@ -38,6 +38,10 @@ public class UserStorage implements Serializable {
     @Schema(description = "用户Id")
     private String userId;
 
+    @Excel(name = "仓库编号", width = 15)
+    @Schema(description = "仓库编号(US + 仓库Id末6位)")
+    private String stationNo;
+
     @Excel(name = "仓库名称", width = 15)
     @Schema(description = "仓库名称")
     private String name;
@@ -49,6 +53,31 @@ public class UserStorage implements Serializable {
     @Excel(name = "是否默认仓", width = 10)
     @Schema(description = "是否默认仓:0否,1是")
     private Integer isDefault;
+
+    @Schema(description = "收件人")
+    private String receiverName;
+
+    @Schema(description = "联系电话")
+    private String phone;
+
+    @Schema(description = "省")
+    private String province;
+
+    @Schema(description = "市")
+    private String city;
+
+    @Schema(description = "区")
+    private String district;
+
+    @Excel(name = "详细地址", width = 30)
+    @Schema(description = "详细地址")
+    private String address;
+
+    @Schema(description = "经度")
+    private java.math.BigDecimal longitude;
+
+    @Schema(description = "纬度")
+    private java.math.BigDecimal latitude;
 
     @Schema(description = "是否删除:0否,1是")
     @TableLogic
@@ -66,7 +95,7 @@ public class UserStorage implements Serializable {
 
     /** 用户手机号（列表展示用，非表字段） */
     @TableField(exist = false)
-    private String phone;
+    private String userPhone;
 
     /** 用户昵称（列表展示用，非表字段） */
     @TableField(exist = false)
