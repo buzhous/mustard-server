@@ -3,30 +3,42 @@ package org.jeecg.modules.app.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.app.entity.OpenAppCredential;
 
+import java.util.List;
+
 public interface IOpenAppCredentialService extends IService<OpenAppCredential> {
 
     /**
-     * 按 AppKey 查询启用的凭据
+     * 按 AppKey 查询启用的凭据（多密钥下任意一条启用即可通过）
      */
     OpenAppCredential getEnabledByAppKey(String appKey);
 
     /**
-     * 按绑定用户查询凭据（不限制状态）
+     * 按绑定用户查询凭据列表（创建时间倒序）
      */
-    OpenAppCredential getByBoundUid(String uid);
+    List<OpenAppCredential> listByUid(String uid);
 
     /**
-     * 用户开启开放授权：无凭据则自动创建（AK/SK 随机生成，状态启用）
+     * 用户新增密钥：随机生成 AppKey 并启用（受每用户上限约束）
      */
-    OpenAppCredential enableByUser(String uid);
+    OpenAppCredential addByUser(String uid, String appName);
 
     /**
-     * 用户关闭开放授权（保留凭据与密钥）
+     * 用户重命名密钥
      */
-    OpenAppCredential disableByUser(String uid);
+    OpenAppCredential renameByUser(String uid, String credentialId, String appName);
 
     /**
-     * 用户重置授权密钥：重新生成 AppKey（随机 SHA-1 哈希）并启用
+     * 用户启用单条密钥
      */
-    OpenAppCredential resetSecretByUser(String uid);
+    OpenAppCredential enableByUser(String uid, String credentialId);
+
+    /**
+     * 用户禁用单条密钥（保留密钥）
+     */
+    OpenAppCredential disableByUser(String uid, String credentialId);
+
+    /**
+     * 用户删除单条密钥
+     */
+    void deleteByUser(String uid, String credentialId);
 }

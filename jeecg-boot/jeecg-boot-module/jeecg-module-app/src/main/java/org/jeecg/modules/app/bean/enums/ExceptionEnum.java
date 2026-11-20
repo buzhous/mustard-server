@@ -72,6 +72,8 @@ public enum ExceptionEnum {
     // 转入/移库/认证 10800-10850
     STORAGE_AUTH_NOT_REAL(10800, "仅自建仓支持平台认证"),
     STORAGE_AUTH_MATERIAL_EMPTY(10801, "认证材料不完整，请补全后提交"),
+    // 开放授权密钥 10850-10860
+    OPEN_CREDENTIAL_LIMIT(10850, "最多创建10个密钥，请先删除不再使用的密钥"),
     STORAGE_AUTH_PENDING(10802, "认证审核中，请耐心等待"),
     STORAGE_AUTH_APPROVED_ALREADY(10803, "该仓库已认证，无需重复提交"),
     STORAGE_NOT_CERTIFIED(10804, "仓库未认证，认证通过后可转入寄放"),
