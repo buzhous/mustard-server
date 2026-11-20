@@ -18,6 +18,8 @@ import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.ItemUserInventory;
 import org.jeecg.modules.app.mapper.ItemRecycleMapper;
 import org.jeecg.modules.app.mapper.ItemSyncMapper;
+import org.jeecg.modules.app.mip.LineageService;
+import org.jeecg.modules.app.mip.MipEventType;
 import org.jeecg.modules.app.service.IItemRecycleService;
 import org.jeecg.modules.app.service.IItemUserInventoryService;
 import org.jeecg.modules.app.utils.FieldElementUtil;
@@ -52,6 +54,9 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
 
     @Autowired
     private IItemUserInventoryService itemUserInventoryService;
+
+    @Autowired
+    private LineageService lineageService;
 
     @Override
     public boolean dropToRecycle(ItemSync itemSync) {
@@ -153,6 +158,8 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
                 .eq(ItemSync::getUserId, userId)
                 .eq(ItemSync::getItemId, recycle.getItemId())
                 .eq(ItemSync::getStatus, SyncStatusEnum.DESTROYED.getCode()));
+        // MIP 流转账本：彻底删除（账本终止事件；幂等键=回收站记录）
+        appendPurgeLineage(recycle, LineageService.OPERATOR_USER);
         return true;
     }
 
@@ -171,9 +178,24 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
                     .eq(ItemSync::getUserId, recycle.getUserId())
                     .eq(ItemSync::getItemId, recycle.getItemId())
                     .eq(ItemSync::getStatus, SyncStatusEnum.DESTROYED.getCode()));
+            // MIP 流转账本：超期自动清除同样为 destroy 终止事件（operator=system）
+            appendPurgeLineage(recycle, LineageService.OPERATOR_SYSTEM);
             count++;
         }
         return count;
+    }
+
+    /**
+     * 彻底删除记账：destroy 为账本终止事件，其后该 ori_id 不允许新事件（协议 5.2）
+     */
+    private void appendPurgeLineage(ItemRecycle recycle, String operator) {
+        lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
+                .setOriId(recycle.getOriId())
+                .setEventType(MipEventType.DESTROY.getCode())
+                .setFromUid(LineageService.hashUid(recycle.getUserId()))
+                .setOperator(operator)
+                .setQty(recycle.getQuantity())
+                .setIdempotencyKey("destroy:" + recycle.getId()));
     }
 
     private ItemRecycle queryRecycleByRecycleId(String recycleId, String itemId) {

@@ -12,6 +12,7 @@ import org.jeecg.common.system.base.controller.JeecgController;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.admin.entity.topic.TopicAdmin;
 import org.jeecg.modules.admin.service.ITopicAdminService;
+import org.jeecg.modules.admin.utils.MipProfileSupport;
 import org.jeecg.modules.admin.utils.TopicFieldClassifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -70,6 +71,10 @@ public class TopicAdminController extends JeecgController<TopicAdmin, ITopicAdmi
         if (fieldError != null) {
             return Result.error(fieldError);
         }
+        String mipError = MipProfileSupport.validateFields(topic.getFields());
+        if (mipError != null) {
+            return Result.error(mipError);
+        }
         Date now = new Date();
         topic.setId(null);
         topic.setCreateTime(now);
@@ -97,6 +102,10 @@ public class TopicAdminController extends JeecgController<TopicAdmin, ITopicAdmi
         String fieldError = TopicFieldClassifier.validate(topic.getFields());
         if (fieldError != null) {
             return Result.error(fieldError);
+        }
+        String mipError = MipProfileSupport.validateFields(topic.getFields());
+        if (mipError != null) {
+            return Result.error(mipError);
         }
         topic.setUpdateTime(new Date());
         topicAdminService.updateTopic(topic);

@@ -18,6 +18,9 @@ import org.jeecg.modules.app.entity.warehouse.UserStationBind;
 import org.jeecg.modules.app.entity.warehouse.UserStorage;
 import org.jeecg.modules.app.entity.warehouse.UserVirtualStation;
 import org.jeecg.modules.app.mapper.ItemInfoMapper;
+import org.jeecg.modules.app.mip.LineageService;
+import org.jeecg.modules.app.mip.MipEventType;
+import org.jeecg.modules.app.mip.MipWriteSupport;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IUserStationBindService;
 import org.jeecg.modules.app.service.IUserStorageService;
@@ -34,13 +37,16 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
     private final IUserStationBindService userStationBindService;
     private final IUserVirtualStationService userVirtualStationService;
     private final IUserStorageService userStorageService;
+    private final LineageService lineageService;
 
     public ItemInfoServiceImpl(IUserStationBindService userStationBindService,
                                IUserVirtualStationService userVirtualStationService,
-                               IUserStorageService userStorageService) {
+                               IUserStorageService userStorageService,
+                               LineageService lineageService) {
         this.userStationBindService = userStationBindService;
         this.userVirtualStationService = userVirtualStationService;
         this.userStorageService = userStorageService;
+        this.lineageService = lineageService;
     }
 
     /**
@@ -131,10 +137,21 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         ItemInfo item = BeanUtil.copyProperties(createVO, ItemInfo.class);
         item.setCreateTime(DateUtil.date());
         item.setUpdateTime(DateUtil.date());
+        // MIP 写路径补级：fields 落库前追加 sensitivity（服务端单点计算，幂等）
+        item.setFields(MipWriteSupport.enrich(item.getFields()));
         // 物品落仓：未指定仓位时自动落入用户默认仓位（优先主站点，其次虚拟仓）
         this.fillDefaultStation(createVO, item);
         // 创建物品信息
         boolean result = this.saveOrUpdate(item);
+        if (result) {
+            // MIP 流转账本：建档 mint（链首事件，幂等键含 itemId 防重复建档污染）
+            lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
+                    .setOriId(createVO.getOriId())
+                    .setEventType(MipEventType.MINT.getCode())
+                    .setToUid(LineageService.hashUid(createVO.getUserId()))
+                    .setOperator(LineageService.OPERATOR_USER)
+                    .setIdempotencyKey("mint:" + item.getId()));
+        }
         createVO.setItemId(String.valueOf(item.getId()));
         return result;
     }
@@ -163,6 +180,21 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         itemInfo.setId(itemInfoExist.getId());
         itemInfo.setCreateTime(DateUtil.date());
         itemInfo.setUpdateTime(DateUtil.date());
+        // MIP 写路径补级：fields 追加 sensitivity，并按组件值为权威回写 identity 列（E-SYNC）
+        itemInfo.setFields(MipWriteSupport.enrich(itemInfo.getFields()));
+        MipWriteSupport.IdentitySync sync = MipWriteSupport.computeIdentitySync(itemInfo.getFields());
+        if (sync.name() != null) {
+            itemInfo.setName(sync.name());
+        }
+        if (sync.icon() != null) {
+            itemInfo.setIcon(sync.icon());
+        }
+        if (sync.category() != null) {
+            itemInfo.setCategory(sync.category());
+        }
+        if (sync.level() != null) {
+            itemInfo.setLevel(sync.level());
+        }
         // 状态：客户端显式传入时透传，否则恢复为正常
         itemInfo.setStatus(ObjectUtil.defaultIfNull(createVO.getStatus(), ItemStatusEnum.NORMAL.getCode()));
         // 仓位字段成对更新：仅当 stationId 与 stationType 同时显式指定时才生效，避免半更新

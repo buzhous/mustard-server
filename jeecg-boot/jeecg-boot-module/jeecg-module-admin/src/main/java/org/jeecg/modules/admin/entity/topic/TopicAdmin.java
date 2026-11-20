@@ -82,4 +82,7 @@ public class TopicAdmin implements Serializable {
 
     @Schema(description = "主题字段配置JSON")
     private String fields;
+
+    @Schema(description = "MIP v1 Profile文档JSON（保存时由服务端自动生成）")
+    private String mipProfile;
 }

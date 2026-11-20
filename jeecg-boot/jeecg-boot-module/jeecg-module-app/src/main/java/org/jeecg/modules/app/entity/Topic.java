@@ -83,4 +83,7 @@ public class Topic implements Serializable {
     @Schema(description = "主题字段")
     private String fields;
 
+    @Schema(description = "MIP v1 Profile文档JSON")
+    private String mipProfile;
+
 }

@@ -22,6 +22,9 @@ import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.ItemUserInventory;
 import org.jeecg.modules.app.mapper.ItemStorageInMapper;
 import org.jeecg.modules.app.mapper.ItemSyncMapper;
+import org.jeecg.modules.app.mip.LineageService;
+import org.jeecg.modules.app.mip.MipEventType;
+import org.jeecg.modules.app.mip.MipWriteSupport;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IItemRecycleService;
 import org.jeecg.modules.app.service.IItemRuinsService;
@@ -56,6 +59,9 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
 
     @Autowired
     ItemStorageInMapper itemStorageInMapper;
+
+    @Autowired
+    LineageService lineageService;
 
     /** 物品是否存在在途/待确认转入/移库单（锁定判定） */
     private boolean isItemLocked(String itemId) {
@@ -228,6 +234,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         itemSync.setVersion(newVersion);
         itemSync.setUserId(itemSyncExist.getUserId());
         itemSync.setItemId(itemSyncExist.getItemId());
+        // MIP 写路径补级：fields 追加 sensitivity（服务端单点计算，幂等）
+        itemSync.setFields(MipWriteSupport.enrich(itemSync.getFields()));
 
         boolean result = this.updateById(itemSync);
         
@@ -300,7 +308,13 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
             throw new AppException(ExceptionEnum.ITEM_DESTROYED);
         }
 
-        return toRecycle ? itemRecycleService.dropToRecycle(itemSyncExist) : itemRuinsService.dropToRuins(itemSyncExist);
+        boolean result = toRecycle ? itemRecycleService.dropToRecycle(itemSyncExist) : itemRuinsService.dropToRuins(itemSyncExist);
+        if (result) {
+            // MIP 流转账本：进入回收站（recycle）/ 丢入殷墟（ruins_drop），幂等键含同步记录与版本
+            appendDestroyLineage(itemSyncExist, version, null,
+                    toRecycle ? MipEventType.RECYCLE : MipEventType.RUINS_DROP);
+        }
+        return result;
     }
 
     private boolean destroyPartialQuantity(ItemSync itemSyncExist, ItemUserInventory inventory,
@@ -323,7 +337,34 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         ItemSync destroyPart = new ItemSync();
         BeanUtil.copyProperties(itemSyncExist, destroyPart);
         destroyPart.setQuantity(destroyQuantity);
-        return toRecycle ? itemRecycleService.dropToRecycle(destroyPart) : itemRuinsService.dropToRuins(destroyPart);
+        boolean result = toRecycle ? itemRecycleService.dropToRecycle(destroyPart) : itemRuinsService.dropToRuins(destroyPart);
+        if (result) {
+            appendDestroyLineage(itemSyncExist, version, destroyQuantity,
+                    toRecycle ? MipEventType.RECYCLE : MipEventType.RUINS_DROP);
+        }
+        return result;
+    }
+
+    /**
+     * 销毁类流转记账：recycle / ruins_drop（MIP 协议 5.2；幂等键=syncId+版本，队列重试零重复）
+     */
+    private void appendDestroyLineage(ItemSync itemSyncExist, Integer version, Integer qty, MipEventType type) {
+        lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
+                .setOriId(itemSyncExist.getOriId())
+                .setEventType(type.getCode())
+                .setFromUid(LineageService.hashUid(itemSyncExist.getUserId()))
+                .setOperator(LineageService.OPERATOR_USER)
+                .setQty(qty)
+                .setPayload(toRecyclePayload(itemSyncExist))
+                .setIdempotencyKey(type.getCode() + ":" + itemSyncExist.getId() + ":" + version));
+    }
+
+    /** 事件摘要：仅标识信息，禁止 fields 内容（协议 5.3） */
+    private String toRecyclePayload(ItemSync sync) {
+        var p = new com.alibaba.fastjson.JSONObject(true);
+        p.put("item_id", sync.getItemId());
+        p.put("version", sync.getVersion());
+        return p.toJSONString();
     }
 
     /**

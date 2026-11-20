@@ -21,6 +21,8 @@ import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.ItemUserInventory;
 import org.jeecg.modules.app.entity.UserCoupon;
 import org.jeecg.modules.app.mapper.ItemRuinsMapper;
+import org.jeecg.modules.app.mip.LineageService;
+import org.jeecg.modules.app.mip.MipEventType;
 import org.jeecg.modules.app.service.IItemRuinsService;
 import org.jeecg.modules.app.service.IItemSyncService;
 import org.jeecg.modules.app.service.IItemUserInventoryService;
@@ -47,6 +49,9 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
 
     @Autowired
     IItemUserInventoryService itemUserInventoryService;
+
+    @Autowired
+    LineageService lineageService;
 
     @Override
     public IPage<ItemRuinsListVO> queryNotPickupRuinsPage(Integer page, Integer size, String userId) {
@@ -143,6 +148,16 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
         ItemSync itemSync = itemSyncService.syncFromRuins(syncVO);
         // 更新殷墟记录关联新itemId
         this.baseMapper.updateRuinsItemId(ruins.getId(), itemSync.getItemId());
+
+        // MIP 流转账本：殷墟拾取（custody 交接，幂等键=殷墟记录，重试零重复）
+        lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
+                .setOriId(ruins.getOriId())
+                .setEventType(MipEventType.RUINS_PICK.getCode())
+                .setFromUid(LineageService.hashUid(ruins.getUserId()))
+                .setToUid(LineageService.hashUid(userId))
+                .setOperator(LineageService.OPERATOR_USER)
+                .setQty(ruins.getQuantity())
+                .setIdempotencyKey("ruins_pick:" + ruins.getId()));
 
         // d) 标记券已使用
         userCouponService.useCoupon(userId, userCoupon.getId(), runsId);

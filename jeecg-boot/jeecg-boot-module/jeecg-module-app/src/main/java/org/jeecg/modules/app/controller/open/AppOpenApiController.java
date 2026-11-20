@@ -2,6 +2,7 @@ package org.jeecg.modules.app.controller.open;
 
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,6 +12,10 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoQueryVO;
 import org.jeecg.modules.app.entity.ItemInfo;
 import org.jeecg.modules.app.entity.OpenAppCredential;
+import org.jeecg.modules.app.mip.LineageService;
+import org.jeecg.modules.app.mip.MipInstanceBuilder;
+import org.jeecg.modules.app.mip.MipProfileBuilder;
+import org.jeecg.modules.app.mip.MipRedlineFilter;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IOpenAppCredentialService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +43,9 @@ public class AppOpenApiController {
 
     @Autowired
     private IItemInfoService itemInfoService;
+
+    @Autowired
+    private LineageService lineageService;
 
     @Operation(summary = "物品分页查询")
     @GetMapping("/item/list")
@@ -69,12 +77,15 @@ public class AppOpenApiController {
                 .setAscending(ascending)
                 .setPageNo(pageNo)
                 .setPageSize(Math.min(pageSize, 100));
-        return Result.OK(itemInfoService.listByCondition(queryVO));
+        Page<ItemInfo> page = itemInfoService.listByCondition(queryVO);
+        // MIP 出域红线：列表轻量视图，fields 剥离 restricted 与 private（开放平台默认无 private 授权）
+        page.getRecords().forEach(r -> r.setFields(MipRedlineFilter.filterFieldsJson(r.getFields(), false)));
+        return Result.OK(page);
     }
 
-    @Operation(summary = "物品详情")
+    @Operation(summary = "物品详情（MIP 实例视图，红线过滤）")
     @GetMapping("/item/detail")
-    public Result<ItemInfo> itemDetail(
+    public Result<JSONObject> itemDetail(
             HttpServletRequest request,
             @RequestParam(name = "itemId") String itemId) {
         Result<OpenAppCredential> authResult = checkAppKey(request);
@@ -89,7 +100,16 @@ public class AppOpenApiController {
         if (ObjectUtil.isEmpty(itemInfo) || !boundUid.equals(itemInfo.getUserId())) {
             return Result.error("物品不存在或无权访问");
         }
-        return Result.OK(itemInfo);
+        // MIP 实例视图：fields → attributes，装配标准实例后做红线过滤（restricted 一律剥离，
+        // private 未授权剥离，重算剥离视图 content_hash 并标记 filtered）
+        JSONObject profile = MipProfileBuilder.build(itemInfo.getFields(), null, null);
+        JSONObject instance = MipInstanceBuilder.build(
+                itemInfo.getOriId(), profile.getString("schema_id"), profile.getString("profile_version"),
+                itemInfo.getFields(), profile.toJSONString(),
+                itemInfo.getName(), itemInfo.getCategory(), itemInfo.getIcon(), itemInfo.getLevel(),
+                LineageService.hashUid(boundUid), itemInfo.getStationId(), itemInfo.getCreateTime(),
+                lineageService.digest(itemInfo.getOriId()));
+        return Result.OK(MipRedlineFilter.filter(instance, false));
     }
 
     /**

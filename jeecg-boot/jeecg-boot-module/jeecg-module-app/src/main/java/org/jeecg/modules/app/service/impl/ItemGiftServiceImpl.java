@@ -24,6 +24,8 @@ import org.jeecg.modules.app.entity.*;
 import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.mapper.ItemGiftMapper;
 import org.jeecg.modules.app.mapper.ItemGiftReceiveMapper;
+import org.jeecg.modules.app.mip.LineageService;
+import org.jeecg.modules.app.mip.MipEventType;
 import org.jeecg.modules.app.service.IAppUserService;
 import org.jeecg.modules.app.service.IItemGiftService;
 import org.jeecg.modules.app.service.IItemInfoService;
@@ -68,6 +70,10 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
 
     @Autowired
     private org.jeecg.modules.app.mapper.ItemStorageInMapper itemStorageInMapper;
+
+    @Lazy
+    @Autowired
+    private LineageService lineageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -126,6 +132,17 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
             }
             itemSyncService.updateById(itemSync);
         }
+
+        // MIP 流转账本：赠送发出（custody 挪出到托管；幂等键=赠送单）
+        lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
+                .setOriId(itemGift.getOriId())
+                .setEventType(MipEventType.GIFT_OUT.getCode())
+                .setFromUid(LineageService.hashUid(userId))
+                .setToUid(GiftTypeEnum.DIRECT.getCode() == itemGift.getGiftType()
+                        ? LineageService.hashUid(itemGift.getReceiverUserId()) : null)
+                .setOperator(LineageService.OPERATOR_USER)
+                .setQty(reqVO.getQuantity())
+                .setIdempotencyKey("gift_out:" + itemGift.getId()));
 
         return BeanUtil.copyProperties(itemGift, ItemGiftRspVO.class);
     }
@@ -257,7 +274,17 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
         itemGift.setUpdateTime(new Date());
         this.updateById(itemGift);
 
+        // MIP 流转账本：赠送领取（custody 交接；幂等键=赠送单+领取人+第N次领取）
+        int receiveSeq = countUserReceivedGift(itemGift.getId(), userId) + 1;
         saveGiftReceiveRecord(itemGift.getId(), userId, receiveQuantity);
+        lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
+                .setOriId(itemGift.getOriId())
+                .setEventType(MipEventType.GIFT_IN.getCode())
+                .setFromUid(LineageService.hashUid(itemGift.getSenderUserId()))
+                .setToUid(LineageService.hashUid(userId))
+                .setOperator(LineageService.OPERATOR_USER)
+                .setQty(receiveQuantity)
+                .setIdempotencyKey("gift_in:" + itemGift.getId() + ":" + userId + ":" + receiveSeq));
 
         // 自建仓实物：领取即赠送完成（归属已转移），自动创建发运单（快递寄送，待接收方确认落仓）
         String shipRecordId = null;
