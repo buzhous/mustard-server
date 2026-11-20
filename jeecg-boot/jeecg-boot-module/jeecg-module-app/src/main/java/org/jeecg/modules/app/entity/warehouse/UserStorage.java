@@ -77,6 +77,25 @@ public class UserStorage implements Serializable {
     @TableLogic
     private Integer deleted;
 
+    @Schema(description = "认证状态:0未认证,1审核中,2已认证,3已驳回")
+    private Integer authStatus;
+
+    @Schema(description = "认证驳回原因")
+    private String authReason;
+
+    @Schema(description = "认证材料JSON")
+    private String authMaterials;
+
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "认证通过时间")
+    private Date authTime;
+
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "最近提交认证时间")
+    private Date authApplyTime;
+
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "创建时间")

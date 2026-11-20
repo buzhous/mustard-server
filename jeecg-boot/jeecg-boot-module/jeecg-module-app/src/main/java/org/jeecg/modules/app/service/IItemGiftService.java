@@ -10,6 +10,7 @@ import org.jeecg.modules.app.bean.vo.gift.ReceiveGiftReqVO;
 import org.jeecg.modules.app.entity.ItemGift;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 物品赠送服务接口
@@ -30,9 +31,9 @@ public interface IItemGiftService extends IService<ItemGift> {
      *
      * @param reqVO   领取请求
      * @param userId  领取者用户ID
-     * @return 是否领取成功
+     * @return shipRecordId/shipDepositNo：自建仓实物领取后自动创建的发运单（其余场景为 null）
      */
-    boolean receiveGift(ReceiveGiftReqVO reqVO, String userId);
+    Map<String, Object> receiveGift(ReceiveGiftReqVO reqVO, String userId);
 
     /**
      * 撤回赠送
@@ -60,6 +61,15 @@ public interface IItemGiftService extends IService<ItemGift> {
      * @return 领取明细列表（昵称、头像、数量、领取时间）
      */
     List<ItemGiftReceiveVO> queryGiftReceivers(String giftId);
+
+    /**
+     * 查询赠送详情（物品 + 双方昵称头像 + 领取记录 + 实物发运单）
+     *
+     * @param giftId       赠送记录ID
+     * @param currentUserId 当前用户ID（仅寄件人/受赠人可见，否则抛 GIFT_NOT_EXIST）
+     * @return 赠送详情VO
+     */
+    ItemGiftListVO queryGiftDetail(String giftId, String currentUserId);
 
     /**
      * 根据兑换码查询赠送记录

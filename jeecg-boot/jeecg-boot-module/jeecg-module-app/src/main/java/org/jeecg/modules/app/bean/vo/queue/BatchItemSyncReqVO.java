@@ -21,9 +21,6 @@ public class BatchItemSyncReqVO implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    @Schema(description = "同步操作：新增-add,更新-update,销毁-destroy", requiredMode = Schema.RequiredMode.REQUIRED)
-    private String syncOps;
-
     @Schema(description = "物品列表", requiredMode = Schema.RequiredMode.REQUIRED)
     private List<ItemSyncReqVO> items;
 

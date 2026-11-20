@@ -89,6 +89,20 @@ public class ItemSync implements Serializable {
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private Integer stationType;
 
+    /**
+     * 在途/待确认状态：0-无单据；>0 为转入/移库单活动状态值（仅下载链路透传）
+     */
+    @Schema(description = "在途/待确认状态")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Integer storageInStatus;
+
+    /**
+     * 在途/待确认单号（仅下载链路透传）
+     */
+    @Schema(description = "在途/待确认单号")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String storageInNo;
+
     @Schema(description = "组件列表")
     private String fields;
 

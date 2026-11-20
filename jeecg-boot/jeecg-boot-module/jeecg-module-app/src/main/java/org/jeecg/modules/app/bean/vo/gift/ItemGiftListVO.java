@@ -11,6 +11,8 @@ import org.springframework.format.annotation.DateTimeFormat;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 物品赠送记录列表VO
@@ -45,11 +47,17 @@ public class ItemGiftListVO implements Serializable {
     @Schema(description = "赠送者昵称")
     private String senderNickname;
 
+    @Schema(description = "赠送者头像")
+    private String senderAvatar;
+
     @Schema(description = "接收者用户ID（指定赠送时使用）")
     private String receiverUserId;
 
     @Schema(description = "接收者昵称")
     private String receiverNickname;
+
+    @Schema(description = "接收者头像")
+    private String receiverAvatar;
 
     @Schema(description = "物品ID")
     private String itemId;
@@ -97,5 +105,11 @@ public class ItemGiftListVO implements Serializable {
 
     @Schema(description = "撤回时间")
     private Date cancelTime;
+
+    @Schema(description = "领取记录（详情接口返回）")
+    private List<ItemGiftReceiveVO> receiveRecords;
+
+    @Schema(description = "实物发运单（详情接口返回，仅 stationType=3 物品）")
+    private List<Map<String, Object>> shipRecords;
 
 }

@@ -5,6 +5,7 @@ import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -18,6 +19,7 @@ import org.jeecg.modules.app.bean.vo.gift.ItemGiftReceiveVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftReqVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftRspVO;
 import org.jeecg.modules.app.bean.vo.gift.ReceiveGiftReqVO;
+import org.jeecg.modules.app.constant.StorageInConstant;
 import org.jeecg.modules.app.entity.*;
 import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.mapper.ItemGiftMapper;
@@ -32,11 +34,13 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -62,9 +66,20 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
     @Autowired
     private ItemGiftReceiveMapper itemGiftReceiveMapper;
 
+    @Autowired
+    private org.jeecg.modules.app.mapper.ItemStorageInMapper itemStorageInMapper;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ItemGiftRspVO createGift(ItemGiftReqVO reqVO, String userId) {
+        // 在途/待确认转移的物品锁定：不可赠送
+        Long activeCount = itemStorageInMapper.selectCount(
+                new LambdaQueryWrapper<ItemStorageIn>()
+                        .eq(ItemStorageIn::getItemId, reqVO.getItemId())
+                        .in(ItemStorageIn::getStatus, StorageInConstant.ACTIVE_STATUSES));
+        if (activeCount != null && activeCount > 0) {
+            throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
+        }
         ItemUserInventory inventory = itemUserInventoryService.queryUserItem(userId, reqVO.getItemId());
         if (ObjectUtil.isEmpty(inventory)) {
             throw new AppException(ExceptionEnum.ITEM_NOT_EXIST);
@@ -117,7 +132,7 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean receiveGift(ReceiveGiftReqVO reqVO, String userId) {
+    public Map<String, Object> receiveGift(ReceiveGiftReqVO reqVO, String userId) {
         ItemGift itemGift = null;
 
         if (ObjectUtil.isNotEmpty(reqVO.getGiftCode())) {
@@ -210,6 +225,9 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
                 newItemSync.setUserId(userId);
                 newItemSync.setQuantity(receiveQuantity);
                 newItemSync.setSyncStatus(SyncStatusEnum.UNSYNCED.getCode());
+                // 源记录可能是赠出方的销毁行：领取方副本必须重置为有效状态并挂接自己的库存
+                newItemSync.setStatus(SyncStatusEnum.SUCCESS.getCode());
+                newItemSync.setInventoryId(userInventory.getId());
                 newItemSync.setVersion(1);
                 newItemSync.setCreateTime(new Date());
                 newItemSync.setUpdateTime(new Date());
@@ -241,7 +259,36 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
 
         saveGiftReceiveRecord(itemGift.getId(), userId, receiveQuantity);
 
-        return true;
+        // 自建仓实物：领取即赠送完成（归属已转移），自动创建发运单（快递寄送，待接收方确认落仓）
+        String shipRecordId = null;
+        String shipDepositNo = null;
+        ItemInfo info = itemInfoService.getById(itemGift.getItemId());
+        if (info != null && info.getStationType() != null && info.getStationType() == 3
+                && StrUtil.isNotBlank(info.getStationId())) {
+            ItemStorageIn ship = new ItemStorageIn()
+                    .setUserId(itemGift.getSenderUserId())
+                    .setItemId(itemGift.getItemId())
+                    .setOriId(itemGift.getOriId())
+                    .setInventoryId(userInventory.getId())
+                    .setStationId(info.getStationId())
+                    .setSource(StorageInConstant.SOURCE_STORAGE)
+                    .setBizType(StorageInConstant.BIZ_MOVE)
+                    .setStatus(StorageInConstant.ST_MOVE_WAIT_RECEIVE)
+                    .setReceiverUserId(userId)
+                    .setGiftId(itemGift.getId())
+                    .setQuantity(receiveQuantity)
+                    .setCreateTime(new Date())
+                    .setUpdateTime(new Date());
+            itemStorageInMapper.insert(ship);
+            ship.setDepositNo(StorageInConstant.buildDepositNo(ship.getId()));
+            itemStorageInMapper.updateById(ship);
+            shipRecordId = String.valueOf(ship.getId());
+            shipDepositNo = ship.getDepositNo();
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("shipRecordId", shipRecordId);
+        data.put("shipDepositNo", shipDepositNo);
+        return data;
     }
 
     @Override
@@ -331,35 +378,7 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
         Set<String> userIds = new HashSet<>();
 
         for (ItemGift gift : resultPage.getRecords()) {
-            ItemGiftListVO vo = cn.hutool.core.bean.BeanUtil.copyProperties(gift, ItemGiftListVO.class);
-
-            if (gift.getGiftType() != null) {
-                for (GiftTypeEnum enumItem : GiftTypeEnum.values()) {
-                    if (enumItem.getCode() == gift.getGiftType()) {
-                        vo.setGiftTypeName(enumItem.getName());
-                        break;
-                    }
-                }
-            }
-
-            if (gift.getStatus() != null) {
-                for (GiftStatusEnum enumItem : GiftStatusEnum.values()) {
-                    if (enumItem.getCode() == gift.getStatus()) {
-                        vo.setStatusName(enumItem.getName());
-                        break;
-                    }
-                }
-            }
-
-            if (ObjectUtil.isNotEmpty(gift.getItemId())) {
-                ItemInfo itemInfo = itemInfoService.getById(gift.getItemId());
-                vo.setItemInfo(itemInfo);
-                if (itemInfo != null) {
-                    vo.setItemName(itemInfo.getName());
-                    vo.setItemIcon(itemInfo.getIcon());
-                    vo.setItemLevel(itemInfo.getLevel());
-                }
-            }
+            ItemGiftListVO vo = convertGiftVO(gift);
 
             if (ObjectUtil.isNotEmpty(gift.getSenderUserId())) {
                 userIds.add(gift.getSenderUserId());
@@ -371,20 +390,120 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
             voList.add(vo);
         }
 
-        // 批量组装赠送者/接收者昵称，避免循环内逐条查询用户
+        // 批量组装赠送者/接收者昵称与头像，避免循环内逐条查询用户
         if (CollectionUtil.isNotEmpty(userIds)) {
             Map<String, AppUser> userMap = new HashMap<>();
             for (AppUser user : appUserService.listByIds(userIds)) {
                 userMap.put(user.getId(), user);
             }
             for (ItemGiftListVO vo : voList) {
-                vo.setSenderNickname(getDisplayNickname(userMap.get(vo.getSenderUserId())));
-                vo.setReceiverNickname(getDisplayNickname(userMap.get(vo.getReceiverUserId())));
+                AppUser sender = userMap.get(vo.getSenderUserId());
+                vo.setSenderNickname(getDisplayNickname(sender));
+                vo.setSenderAvatar(sender == null ? null : sender.getAvatar());
+                AppUser receiver = userMap.get(vo.getReceiverUserId());
+                vo.setReceiverNickname(getDisplayNickname(receiver));
+                vo.setReceiverAvatar(receiver == null ? null : receiver.getAvatar());
             }
         }
 
         voPage.setRecords(voList);
         return voPage;
+    }
+
+    /** 赠送单 → 列表VO 基础转换（类型/状态名 + 物品信息），列表与详情共用 */
+    private ItemGiftListVO convertGiftVO(ItemGift gift) {
+        ItemGiftListVO vo = cn.hutool.core.bean.BeanUtil.copyProperties(gift, ItemGiftListVO.class);
+
+        if (gift.getGiftType() != null) {
+            for (GiftTypeEnum enumItem : GiftTypeEnum.values()) {
+                if (enumItem.getCode() == gift.getGiftType()) {
+                    vo.setGiftTypeName(enumItem.getName());
+                    break;
+                }
+            }
+        }
+
+        if (gift.getStatus() != null) {
+            for (GiftStatusEnum enumItem : GiftStatusEnum.values()) {
+                if (enumItem.getCode() == gift.getStatus()) {
+                    vo.setStatusName(enumItem.getName());
+                    break;
+                }
+            }
+        }
+
+        if (ObjectUtil.isNotEmpty(gift.getItemId())) {
+            ItemInfo itemInfo = itemInfoService.getById(gift.getItemId());
+            vo.setItemInfo(itemInfo);
+            if (itemInfo != null) {
+                vo.setItemName(itemInfo.getName());
+                vo.setItemIcon(itemInfo.getIcon());
+                vo.setItemLevel(itemInfo.getLevel());
+            }
+        }
+        return vo;
+    }
+
+    @Override
+    public ItemGiftListVO queryGiftDetail(String giftId, String currentUserId) {
+        ItemGift gift = this.getById(giftId);
+        if (gift == null) {
+            throw new AppException(ExceptionEnum.GIFT_NOT_EXIST);
+        }
+        // 权限：寄件人/受赠人可见（未领取的公开赠送 receiverUserId 为空，仅寄件人可见）
+        boolean isSender = Objects.equals(gift.getSenderUserId(), currentUserId);
+        boolean isReceiver = ObjectUtil.isNotEmpty(gift.getReceiverUserId())
+                && Objects.equals(gift.getReceiverUserId(), currentUserId);
+        if (!isSender && !isReceiver) {
+            throw new AppException(ExceptionEnum.GIFT_NOT_EXIST);
+        }
+
+        ItemGiftListVO vo = convertGiftVO(gift);
+
+        // 双方昵称与头像
+        Set<String> userIds = new HashSet<>();
+        if (ObjectUtil.isNotEmpty(gift.getSenderUserId())) {
+            userIds.add(gift.getSenderUserId());
+        }
+        if (ObjectUtil.isNotEmpty(gift.getReceiverUserId())) {
+            userIds.add(gift.getReceiverUserId());
+        }
+        if (CollectionUtil.isNotEmpty(userIds)) {
+            for (AppUser user : appUserService.listByIds(userIds)) {
+                if (Objects.equals(user.getId(), gift.getSenderUserId())) {
+                    vo.setSenderNickname(getDisplayNickname(user));
+                    vo.setSenderAvatar(user.getAvatar());
+                } else if (Objects.equals(user.getId(), gift.getReceiverUserId())) {
+                    vo.setReceiverNickname(getDisplayNickname(user));
+                    vo.setReceiverAvatar(user.getAvatar());
+                }
+            }
+        }
+
+        // 领取记录
+        vo.setReceiveRecords(queryGiftReceivers(giftId));
+
+        // 实物发运单（giftId 关联，bizType=2）
+        List<ItemStorageIn> ships = itemStorageInMapper.selectList(new LambdaQueryWrapper<ItemStorageIn>()
+                .eq(ItemStorageIn::getGiftId, giftId)
+                .eq(ItemStorageIn::getBizType, StorageInConstant.BIZ_MOVE)
+                .orderByDesc(ItemStorageIn::getCreateTime));
+        List<Map<String, Object>> shipRecords = new ArrayList<>();
+        for (ItemStorageIn ship : ships) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("id", ship.getId());
+            m.put("depositNo", ship.getDepositNo());
+            m.put("status", ship.getStatus());
+            m.put("statusDesc", StorageInConstant.statusDesc(ship.getStatus()));
+            m.put("expressNo", ship.getExpressNo());
+            m.put("quantity", ship.getQuantity());
+            m.put("receiverStationId", ship.getReceiverStationId());
+            m.put("receiverStationType", ship.getReceiverStationType());
+            m.put("createTime", ship.getCreateTime());
+            shipRecords.add(m);
+        }
+        vo.setShipRecords(shipRecords);
+        return vo;
     }
 
     @Override

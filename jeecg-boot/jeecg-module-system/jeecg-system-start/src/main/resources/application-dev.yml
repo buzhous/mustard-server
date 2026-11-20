@@ -179,6 +179,12 @@ mybatis-plus:
 minidao:
   base-package: org.jeecg.modules.jmreport.*,org.jeecg.modules.drag.*,org.jeecg.modules.chat2bi.*
 jeecg:
+  # 快递100 寄件下单（key 为空时走 mock 模式，便于本地/E2E）
+  kuaidi100:
+    key:
+    code:
+    callback-url:
+    com: zhongtong
   # 自定义资源请求前缀（js、css等解决nginx转发问题）
   custom-resource-prefix-path:
   # AI集成

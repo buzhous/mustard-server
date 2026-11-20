@@ -206,9 +206,7 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
         if (ObjectUtil.isEmpty(loginUser)) {
             return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
         }
-        if (StrUtil.isEmpty(batchVO.getSyncOps())) {
-            return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
-        }
+        // 批量协议：操作类型在 item 级 syncOps（add/edit/destroy/delete 可混合），非法值由服务层进 failList
         if (ObjectUtil.isEmpty(batchVO.getItems())) {
             return Result.error("物品列表不能为空");
         }

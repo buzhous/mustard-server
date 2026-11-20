@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Tag(name = "物品赠送")
@@ -75,12 +76,12 @@ public class ItemGiftController {
 
     @Operation(summary = "领取赠送")
     @PostMapping(value = "/receive")
-    public Result<Boolean> receiveGift(@RequestBody ReceiveGiftReqVO reqVO) {
+    public Result<Map<String, Object>> receiveGift(@RequestBody ReceiveGiftReqVO reqVO) {
         AppUser loginUser = AppAuthUtil.getUserInfo();
         if (ObjectUtil.isEmpty(loginUser)) {
             throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
-        boolean result = itemGiftService.receiveGift(reqVO, loginUser.getId());
+        Map<String, Object> result = itemGiftService.receiveGift(reqVO, loginUser.getId());
         return Result.OK(result);
     }
 
@@ -121,12 +122,12 @@ public class ItemGiftController {
 
     @Operation(summary = "赠送详情")
     @GetMapping(value = "/detail")
-    public Result<ItemGift> detail(@RequestParam String giftId) {
-        ItemGift itemGift = itemGiftService.getById(giftId);
-        if (ObjectUtil.isEmpty(itemGift)) {
-            throw new AppException(ExceptionEnum.GIFT_NOT_EXIST);
+    public Result<ItemGiftListVO> detail(@RequestParam String giftId) {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
         }
-        return Result.OK(itemGift);
+        return Result.OK(itemGiftService.queryGiftDetail(giftId, loginUser.getId()));
     }
 
     @Operation(summary = "通过兑换码查询赠送")

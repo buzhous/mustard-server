@@ -15,9 +15,12 @@ import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.inventory.ItemInventoryVO;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoCreateVO;
 import org.jeecg.modules.app.bean.vo.queue.*;
+import org.jeecg.modules.app.constant.StorageInConstant;
 import org.jeecg.modules.app.entity.ItemInfo;
+import org.jeecg.modules.app.entity.ItemStorageIn;
 import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.ItemUserInventory;
+import org.jeecg.modules.app.mapper.ItemStorageInMapper;
 import org.jeecg.modules.app.mapper.ItemSyncMapper;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IItemRecycleService;
@@ -50,6 +53,20 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Lazy
     @Autowired
     IItemRecycleService itemRecycleService;
+
+    @Autowired
+    ItemStorageInMapper itemStorageInMapper;
+
+    /** 物品是否存在在途/待确认转入/移库单（锁定判定） */
+    private boolean isItemLocked(String itemId) {
+        if (ObjectUtil.isEmpty(itemId)) {
+            return false;
+        }
+        Long count = itemStorageInMapper.selectCount(new LambdaQueryWrapper<ItemStorageIn>()
+                .eq(ItemStorageIn::getItemId, itemId)
+                .in(ItemStorageIn::getStatus, StorageInConstant.ACTIVE_STATUSES));
+        return count != null && count > 0;
+    }
 
     // 根据itemId查询物品同步记录方法
     @Override
@@ -170,7 +187,11 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Transactional(rollbackFor = Exception.class)
     public boolean syncUploadEdit(ItemSyncReqVO syncReqVO) {
         ItemSync itemSyncExist = validateAndGetItemSync(syncReqVO);
-        
+        // 在途/待确认转移的物品锁定：不可编辑（转入/移库完成或取消后解锁）
+        if (isItemLocked(itemSyncExist.getItemId())) {
+            throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
+        }
+
         ItemSync itemSync = FieldElementUtil.convertToJsonFields(syncReqVO, new ItemSync());
         return updateItemSyncAndRelated(itemSyncExist, itemSync, syncReqVO);
     }
@@ -242,6 +263,10 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
      */
     private boolean doDestroy(ItemSyncReqVO syncVO, boolean toRecycle) {
         ItemSync itemSyncExist = validateAndGetItemSync(syncVO);
+        // 在途/待确认转移的物品锁定：不可销毁/删除
+        if (isItemLocked(itemSyncExist.getItemId())) {
+            throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
+        }
 
         ItemUserInventory inventory = itemUserInventoryService.queryUserItem(syncVO.getUserId(), syncVO.getItemId());
         if (ObjectUtil.isEmpty(inventory)) {
@@ -327,6 +352,23 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
             }
             item.setStationId(info.getStationId());
             item.setStationType(info.getStationType());
+        }
+        // 在途/待确认角标：批量回填活动转入/移库单状态与单号（不落库）
+        List<ItemStorageIn> activeRecords = itemStorageInMapper.selectList(
+                new LambdaQueryWrapper<ItemStorageIn>()
+                        .in(ItemStorageIn::getItemId, itemIds)
+                        .in(ItemStorageIn::getStatus, StorageInConstant.ACTIVE_STATUSES));
+        if (ObjectUtil.isNotEmpty(activeRecords)) {
+            Map<String, ItemStorageIn> activeMap = activeRecords.stream()
+                    .collect(java.util.stream.Collectors.toMap(
+                            ItemStorageIn::getItemId, record -> record, (a, b) -> a));
+            for (ItemSync item : items) {
+                ItemStorageIn record = activeMap.get(item.getItemId());
+                if (record != null) {
+                    item.setStorageInStatus(record.getStatus());
+                    item.setStorageInNo(record.getDepositNo());
+                }
+            }
         }
     }
 
