@@ -185,6 +185,10 @@ jeecg:
     code:
     callback-url:
     com: zhongtong
+    # mock 模式拟真状态流转节奏（秒）：揽收/运输/签收；配置真实 key 后自动失效
+    mock-pickup-seconds: 15
+    mock-transit-seconds: 30
+    mock-signed-seconds: 60
   # 自定义资源请求前缀（js、css等解决nginx转发问题）
   custom-resource-prefix-path:
   # AI集成

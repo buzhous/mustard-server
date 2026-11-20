@@ -15,6 +15,7 @@ import org.jeecg.modules.app.entity.KuaidiOrder;
 import org.jeecg.modules.app.mapper.KuaidiOrderMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
@@ -50,6 +51,11 @@ public class Kuaidi100Service {
     @Autowired
     private KuaidiOrderMapper kuaidiOrderMapper;
 
+    /** @Lazy 破解 Kuaidi100Service→Scheduler→StorageIn→Kuaidi100Service 循环依赖 */
+    @Autowired
+    @Lazy
+    private KuaidiMockScheduler mockScheduler;
+
     public boolean isMock() {
         return StrUtil.isBlank(secretKey);
     }
@@ -76,10 +82,10 @@ public class Kuaidi100Service {
                 .setCreateTime(now)
                 .setUpdateTime(now);
         if (isMock()) {
-            order.setTaskId("MOCK" + IdUtil.fastSimpleUUID().substring(0, 16).toUpperCase())
-                    .setKuaidinum("MOCK" + RandomUtil.randomNumbers(10))
+            order.setTaskId(IdUtil.fastSimpleUUID())
+                    .setKuaidinum("78" + RandomUtil.randomNumbers(10))
                     .setPickCode(String.valueOf(RandomUtil.randomInt(1000, 9999)))
-                    .setCallbackRaw("{\"mock\":true}");
+                    .setCallbackRaw("{\"mock\":true,\"status\":0}");
         } else {
             JSONObject param = new JSONObject();
             param.set("kuaidicom", kuaidicom);
@@ -120,6 +126,10 @@ public class Kuaidi100Service {
                     .setCallbackRaw(StrUtil.sub(resp, 0, 2000));
         }
         kuaidiOrderMapper.insert(order);
+        // mock 模式：调度拟真状态流转（揽收→运输→签收），换真实密钥后由快递100 真实回调接管
+        if (isMock()) {
+            mockScheduler.scheduleMockFlow(order);
+        }
         return order;
     }
 
