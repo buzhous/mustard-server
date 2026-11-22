@@ -23,6 +23,10 @@ public enum MipEventType {
     RUINS_PICK("ruins_pick", "殷墟拾取"),
     /** 定向流转（D1，无资金结算） */
     TRANSFER("transfer", "定向流转"),
+    /** 流转发出（两阶段要约被确认时与 flow_in 成对入链：发起方放行视角） */
+    FLOW_OUT("flow_out", "流转发出"),
+    /** 流转接收（两阶段要约被确认时与 flow_out 成对入链：接收方领取视角） */
+    FLOW_IN("flow_in", "流转接收"),
     /** 数量拆分派生新档（跨持有者拆分时接收方新 ori_id） */
     SPAWN("spawn", "拆分派生"),
     /** 回收站彻底删除（账本终止事件） */

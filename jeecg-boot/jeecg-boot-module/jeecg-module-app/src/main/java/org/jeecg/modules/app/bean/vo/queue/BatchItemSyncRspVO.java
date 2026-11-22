@@ -51,6 +51,12 @@ public class BatchItemSyncRspVO implements Serializable {
 
         @Schema(description = "错误信息")
         private String errorMsg;
+
+        @Schema(description = "错误码（AppResultCode/ExceptionEnum，未分类系统异常为 500）")
+        private Integer code;
+
+        @Schema(description = "是否永久性失败：true=重试无效，客户端应停止重试并提示用户；false=可退避重试")
+        private Boolean permanent;
     }
 
 }

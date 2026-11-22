@@ -86,6 +86,7 @@ public enum ExceptionEnum {
     KUAIDI_ORDER_FAIL(10811, "快递下单失败，请稍后重试"),
     STORAGE_MOVE_ONLY_STORAGE(10812, "仅自建仓物品支持移库转移"),
     STORAGE_IN_SELF_MOVE(10813, "接收人不能是自己"),
+    ITEM_FLOW_OFFERED(10814, "物品存在待响应流转要约，暂不可操作"),
     // 通用业务错误 11000-12000
     DATA_UPDATE_ERROR(11000, "更新失败"),
     DATA_DELETE_ERROR(11001, "删除失败"),

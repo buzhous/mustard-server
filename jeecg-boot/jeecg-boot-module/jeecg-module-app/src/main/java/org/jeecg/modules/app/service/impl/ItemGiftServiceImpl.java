@@ -75,6 +75,11 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
     @Autowired
     private LineageService lineageService;
 
+    /** D1 流转要约锁（App 端赠送硬约束） */
+    @Lazy
+    @Autowired
+    private org.jeecg.modules.app.service.ItemFlowService itemFlowService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ItemGiftRspVO createGift(ItemGiftReqVO reqVO, String userId) {
@@ -91,6 +96,10 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
                         .in(ItemStorageIn::getStatus, StorageInConstant.ACTIVE_STATUSES));
         if (activeCount != null && activeCount > 0) {
             throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
+        }
+        // 流转要约锁定期：不可赠送（要约失效/拒绝/撤回/确认后解锁）
+        if (itemFlowService.locked(reqVO.getItemId())) {
+            throw new AppException(ExceptionEnum.ITEM_FLOW_OFFERED);
         }
         ItemUserInventory inventory = itemUserInventoryService.queryUserItem(userId, reqVO.getItemId());
         if (ObjectUtil.isEmpty(inventory)) {

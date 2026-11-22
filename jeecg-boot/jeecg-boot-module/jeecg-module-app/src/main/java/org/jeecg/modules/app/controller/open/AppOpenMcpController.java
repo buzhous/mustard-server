@@ -50,7 +50,8 @@ public class AppOpenMcpController {
     private final Map<String, SseEmitter> sseEmitters = new ConcurrentHashMap<>();
 
     /** MCP 写工具（dispatch 层追加写限流窗口） */
-    private static final List<String> WRITE_TOOLS = List.of("add_item", "update_item", "delete_item", "gift_item");
+    private static final List<String> WRITE_TOOLS = List.of(
+            "add_item", "update_item", "delete_item", "gift_item", "flow_offer", "flow_respond");
 
     private final List<Map<String, Object>> TOOLS = List.of(
             tool("list_items", "分页查询用户的物品列表（轻量摘要，含 schemaId/contentHash）", Map.of(
@@ -113,10 +114,26 @@ public class AppOpenMcpController {
                     "itemId", Map.of("type", "string", "description", "step=preview 时必填：物品ID"),
                     "giftToken", Map.of("type", "string", "description", "step=execute 时必填：preview 返回的 giftToken"),
                     "toUserId", Map.of("type", "string", "description", "step=execute 时必填：接收方用户ID")),
-                    List.of("step")));
+                    List.of("step")),
+            tool("flow_offer", "发起定向流转要约（两阶段，无资金结算）。发起后该物品锁定 72 小时（锁定期不可赠送/编辑/删除/重复发起），接收方必须是平台 App 用户（按用户ID定位）。72h 未响应自动失效并解锁。", Map.of(
+                    "itemId", Map.of("type", "string", "description", "要流转的物品ID（当前账号名下）"),
+                    "toUserId", Map.of("type", "string", "description", "接收方 App 用户ID（账号ID，不能是自己）"),
+                    "idempotencyKey", Map.of("type", "string", "description", "幂等键，重复调用返回首次结果")),
+                    List.of("itemId", "toUserId")),
+            tool("flow_respond", "处理流转要约：action=accept 确认 / reject 拒绝（两者仅当要约接收方是当前凭据绑定用户本人时可用，不支持代第三方接收）/ cancel 撤回自己发出的要约。accept 后物品归属立即转移并落账本 flow_out/flow_in 事件。", Map.of(
+                    "action", Map.of("type", "string", "description", "accept 确认 / reject 拒绝 / cancel 撤回", "enum", List.of("accept", "reject", "cancel")),
+                    "flowToken", Map.of("type", "string", "description", "要约令牌（flow_offer 返回或 flow_list 查得）"),
+                    "idempotencyKey", Map.of("type", "string", "description", "幂等键，重复调用返回首次结果")),
+                    List.of("action", "flowToken")),
+            tool("flow_list", "查询待处理的流转要约（dir=sent 发出 / received 收到 / all 全部，默认 all；仅 72h 窗口内待响应要约，已完成的流转以 get_item_lineage 的 flow_out/flow_in 事件为准）", Map.of(
+                    "dir", Map.of("type", "string", "description", "方向过滤：sent / received / all（默认 all）", "enum", List.of("sent", "received", "all"))),
+                    List.of()));
 
     @Autowired
     private AppOpenService appOpenService;
+
+    @Autowired
+    private org.jeecg.modules.app.service.ItemFlowService itemFlowService;
 
     @Autowired
     private OpenRateLimiter rateLimiter;
@@ -320,6 +337,29 @@ public class AppOpenMcpController {
                         yield null;
                     }
                 }
+                case "flow_offer" -> {
+                    Object idem = arguments.get("idempotencyKey");
+                    String idempotencyKey = idem == null ? UUID.randomUUID().toString() : String.valueOf(idem);
+                    yield toolBusinessJson(itemFlowService.offer(credential, arguments, idempotencyKey));
+                }
+                case "flow_respond" -> {
+                    String action = arguments.getString("action");
+                    String flowToken = arguments.getString("flowToken");
+                    if (StrUtil.isEmpty(action) || StrUtil.isEmpty(flowToken)) {
+                        yield null;
+                    }
+                    Object idem = arguments.get("idempotencyKey");
+                    String idempotencyKey = idem == null ? UUID.randomUUID().toString() : String.valueOf(idem);
+                    Result<JSONObject> result = switch (action) {
+                        case "accept" -> itemFlowService.accept(credential, flowToken, idempotencyKey);
+                        case "reject" -> itemFlowService.reject(credential, flowToken, idempotencyKey);
+                        case "cancel" -> itemFlowService.cancel(credential, flowToken, idempotencyKey);
+                        default -> null;
+                    };
+                    yield result == null ? null : toolBusinessJson(result);
+                }
+                case "flow_list" -> JSON.toJSONString(
+                        itemFlowService.list(credential.getBoundUid(), arguments.getString("dir")));
                 default -> null;
             };
             if (json == null) {

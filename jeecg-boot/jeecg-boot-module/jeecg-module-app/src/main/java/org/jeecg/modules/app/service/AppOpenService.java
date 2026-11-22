@@ -68,6 +68,9 @@ public class AppOpenService {
     private IItemGiftService itemGiftService;
 
     @Autowired
+    private ItemFlowService itemFlowService;
+
+    @Autowired
     private IItemUserInventoryService itemUserInventoryService;
 
     @Autowired
@@ -354,6 +357,10 @@ public class AppOpenService {
             f.put("content", contentFor(element, attr.get("value")));
             fields.add(f);
         }
+        // 流转锁复核：锁定期拒编辑（D1 定向流转）
+        if (itemFlowService.locked(String.valueOf(exists.getId()))) {
+            return Result.error(409, "物品正在流转中（存在待响应要约），暂不可编辑");
+        }
         // MIP 写入链：enrich → identity 同步 → 全量校验（422 对齐新增）
         String fieldsJson = MipWriteSupport.enrich(fields.toJSONString());
         MipWriteSupport.IdentitySync sync = MipWriteSupport.computeIdentitySync(fieldsJson);
@@ -432,6 +439,10 @@ public class AppOpenService {
         if (exists == null) {
             return Result.error(404, "物品不存在或不在凭据数据范围内");
         }
+        // 流转锁复核：锁定期拒删除（D1 定向流转）
+        if (itemFlowService.locked(String.valueOf(exists.getId()))) {
+            return Result.error(409, "物品正在流转中（存在待响应要约），暂不可删除");
+        }
         // 库存记录移除（存在才删）
         org.jeecg.modules.app.entity.ItemUserInventory inventory =
                 itemUserInventoryService.queryUserItem(credential.getBoundUid(), itemId);
@@ -466,6 +477,10 @@ public class AppOpenService {
         ItemInfo item = getOwnedItem(credential.getBoundUid(), itemId);
         if (item == null) {
             return Result.error(404, "item not found");
+        }
+        // 流转锁复核：锁定期拒赠送（preview 一并拦截，避免用户确认后才撞锁）
+        if (itemFlowService.locked(String.valueOf(item.getId()))) {
+            return Result.error(409, "物品正在流转中（存在待响应要约），暂不可赠送");
         }
         String token = IdUtil.fastSimpleUUID();
         JSONObject payload = new JSONObject(true);
@@ -510,6 +525,10 @@ public class AppOpenService {
         if (!credential.getAppKey().equals(payload.getString("appKey"))
                 || !credential.getBoundUid().equals(payload.getString("boundUid"))) {
             return Result.error(403, "giftToken 与当前凭据不匹配");
+        }
+        // 流转锁复核：锁定期拒赠送（D1 定向流转）
+        if (itemFlowService.locked(payload.getString("itemId"))) {
+            return Result.error(409, "物品正在流转中（存在待响应要约），暂不可赠送");
         }
         // 一次性：立即删除（防并发重放）
         redisUtil.del(KEY_GIFT_TOKEN + giftToken);

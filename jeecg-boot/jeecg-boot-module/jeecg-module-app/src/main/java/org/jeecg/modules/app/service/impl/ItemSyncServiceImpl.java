@@ -63,6 +63,11 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Autowired
     LineageService lineageService;
 
+    /** D1 流转要约锁（@Lazy 打破与 ItemFlowService→IItemSyncService 的循环引用） */
+    @Lazy
+    @Autowired
+    private org.jeecg.modules.app.service.ItemFlowService itemFlowService;
+
     /** 物品是否存在在途/待确认转入/移库单（锁定判定） */
     private boolean isItemLocked(String itemId) {
         if (ObjectUtil.isEmpty(itemId)) {
@@ -197,6 +202,10 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         if (isItemLocked(itemSyncExist.getItemId())) {
             throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
         }
+        // 流转要约锁定期：不可编辑（要约失效/拒绝/撤回/确认后解锁）
+        if (itemFlowService.locked(itemSyncExist.getItemId())) {
+            throw new AppException(ExceptionEnum.ITEM_FLOW_OFFERED);
+        }
 
         ItemSync itemSync = FieldElementUtil.convertToJsonFields(syncReqVO, new ItemSync());
         return updateItemSyncAndRelated(itemSyncExist, itemSync, syncReqVO);
@@ -227,7 +236,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     }
 
     private boolean updateItemSyncAndRelated(ItemSync itemSyncExist, ItemSync itemSync, ItemSyncReqVO syncReqVO) {
-        int newVersion = itemSyncExist.getVersion() + 1;
+        // version 兜底：开放平台创建等历史路径可能落 NULL，按 1 起算防 NPE
+        int newVersion = (itemSyncExist.getVersion() == null ? 1 : itemSyncExist.getVersion()) + 1;
 
         itemSync.setId(itemSyncExist.getId());
         itemSync.setSyncStatus(SyncStatusEnum.SUCCESS.getCode());
@@ -275,6 +285,10 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         if (isItemLocked(itemSyncExist.getItemId())) {
             throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
         }
+        // 流转要约锁定期：不可销毁/删除/投放殷墟（要约失效/拒绝/撤回/确认后解锁）
+        if (itemFlowService.locked(itemSyncExist.getItemId())) {
+            throw new AppException(ExceptionEnum.ITEM_FLOW_OFFERED);
+        }
 
         ItemUserInventory inventory = itemUserInventoryService.queryUserItem(syncVO.getUserId(), syncVO.getItemId());
         if (ObjectUtil.isEmpty(inventory)) {
@@ -302,8 +316,11 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     }
 
     private boolean destroyItemCompletely(ItemSync itemSyncExist, Integer version, boolean toRecycle) {
+        // 服务端权威版本号：客户端未传时取库内 version+1 兜底，防止 markDestroyedIfNot 显式写 version=NULL 污染版本链
+        Integer newVersion = ObjectUtil.defaultIfNull(version,
+                ObjectUtil.defaultIfNull(itemSyncExist.getVersion(), 1) + 1);
         // 条件原子更新：仅未销毁状态可翻转，防止重复销毁并发覆盖
-        int rows = this.baseMapper.markDestroyedIfNot(itemSyncExist.getId(), SyncStatusEnum.DESTROYED.getCode(), version);
+        int rows = this.baseMapper.markDestroyedIfNot(itemSyncExist.getId(), SyncStatusEnum.DESTROYED.getCode(), newVersion);
         if (rows == 0) {
             throw new AppException(ExceptionEnum.ITEM_DESTROYED);
         }
@@ -311,7 +328,7 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         boolean result = toRecycle ? itemRecycleService.dropToRecycle(itemSyncExist) : itemRuinsService.dropToRuins(itemSyncExist);
         if (result) {
             // MIP 流转账本：进入回收站（recycle）/ 丢入殷墟（ruins_drop），幂等键含同步记录与版本
-            appendDestroyLineage(itemSyncExist, version, null,
+            appendDestroyLineage(itemSyncExist, newVersion, null,
                     toRecycle ? MipEventType.RECYCLE : MipEventType.RUINS_DROP);
         }
         return result;
@@ -326,10 +343,12 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         }
 
         // 同步记录数量更新为扣减后的剩余数量（保持云端物品档案与库存一致）
+        // 版本号服务端权威计算，客户端未传时 +1 兜底，避免客户端值直写/写 NULL
         ItemSync itemSyncUpdate = new ItemSync();
         itemSyncUpdate.setId(itemSyncExist.getId());
         itemSyncUpdate.setQuantity(inventoryQuantity - destroyQuantity);
-        itemSyncUpdate.setVersion(version);
+        itemSyncUpdate.setVersion(ObjectUtil.defaultIfNull(version,
+                ObjectUtil.defaultIfNull(itemSyncExist.getVersion(), 1) + 1));
         this.updateById(itemSyncUpdate);
 
         // 扣减数量的物品掉入殷墟公海（同一物品多次部分销毁自动累加）
@@ -562,29 +581,52 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
                     successItem.setOriId(itemVO.getOriId());
                     successItem.setItemId(itemVO.getItemId());
                     successItem.setInventoryId(itemVO.getInventoryId());
-                    successItem.setSyncStatus(itemVO.getSyncStatus());
-                    successItem.setVersion(itemVO.getVersion());
+                    // 回填真实落库态（sync_status/version），避免回显请求值造成客户端误判
+                    ItemSync syncedRow = this.queryItemSyncByItemId(itemVO.getItemId(), itemVO.getOriId(), itemVO.getUserId());
+                    if (syncedRow != null) {
+                        successItem.setSyncStatus(syncedRow.getSyncStatus());
+                        successItem.setVersion(syncedRow.getVersion());
+                    } else {
+                        successItem.setSyncStatus(itemVO.getSyncStatus());
+                        successItem.setVersion(itemVO.getVersion());
+                    }
                     rspVO.getSuccessList().add(successItem);
                     rspVO.setSuccessCount(rspVO.getSuccessCount() + 1);
                 } else {
-                    BatchItemSyncRspVO.FailItemSyncRspVO failItem = new BatchItemSyncRspVO.FailItemSyncRspVO();
-                    failItem.setOriId(itemVO.getOriId());
-                    failItem.setItemId(itemVO.getItemId());
-                    failItem.setErrorMsg("同步操作失败");
+                    BatchItemSyncRspVO.FailItemSyncRspVO failItem = this.buildFailItem(itemVO,
+                            new AppException(ExceptionEnum.REQUEST_PARAM_ERROR, "同步操作失败"));
                     rspVO.getFailList().add(failItem);
                     rspVO.setFailCount(rspVO.getFailCount() + 1);
                 }
             } catch (Exception e) {
-                BatchItemSyncRspVO.FailItemSyncRspVO failItem = new BatchItemSyncRspVO.FailItemSyncRspVO();
-                failItem.setOriId(itemVO.getOriId());
-                failItem.setItemId(itemVO.getItemId());
-                failItem.setErrorMsg(e.getMessage());
-                rspVO.getFailList().add(failItem);
+                rspVO.getFailList().add(this.buildFailItem(itemVO, e));
                 rspVO.setFailCount(rspVO.getFailCount() + 1);
             }
         }
-        
+
         return rspVO;
+    }
+
+    /**
+     * 构造失败项并分类：AppException 按错误码判定 permanent（物品不存在/已销毁/参数错误为永久性失败，
+     * 重试无效；在途/流转锁定期为可重试）；未分类系统异常一律可重试。
+     */
+    private BatchItemSyncRspVO.FailItemSyncRspVO buildFailItem(ItemSyncReqVO itemVO, Exception e) {
+        BatchItemSyncRspVO.FailItemSyncRspVO failItem = new BatchItemSyncRspVO.FailItemSyncRspVO();
+        failItem.setOriId(itemVO.getOriId());
+        failItem.setItemId(itemVO.getItemId());
+        failItem.setErrorMsg(e.getMessage());
+        if (e instanceof AppException appEx) {
+            int code = appEx.getCode();
+            failItem.setCode(code);
+            failItem.setPermanent(code == ExceptionEnum.REQUEST_PARAM_ERROR.getCode()
+                    || code == ExceptionEnum.ITEM_NOT_EXIST.getCode()
+                    || code == ExceptionEnum.ITEM_DESTROYED.getCode());
+        } else {
+            failItem.setCode(500);
+            failItem.setPermanent(false);
+        }
+        return failItem;
     }
 
 }

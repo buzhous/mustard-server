@@ -25,11 +25,16 @@ public final class OpenScopeChecker {
             "/app/open/item/update", SCOPE_READWRITE,
             "/app/open/item/delete", SCOPE_READWRITE,
             "/app/open/gift/preview", SCOPE_READWRITE,
-            "/app/open/gift/send", SCOPE_READWRITE
+            "/app/open/gift/send", SCOPE_READWRITE,
+            "/app/open/flow/offer", SCOPE_READWRITE,
+            "/app/open/flow/accept", SCOPE_READWRITE,
+            "/app/open/flow/reject", SCOPE_READWRITE,
+            "/app/open/flow/cancel", SCOPE_READWRITE
     );
 
     /** MCP 写工具清单（readwrite 才可调用） */
-    public static final Set<String> MCP_WRITE_TOOLS = Set.of("add_item", "update_item", "delete_item", "gift_item");
+    public static final Set<String> MCP_WRITE_TOOLS = Set.of(
+            "add_item", "update_item", "delete_item", "gift_item", "flow_offer", "flow_respond");
 
     /**
      * 该请求是否为写操作（REST：POST 且命中写路径精确表）

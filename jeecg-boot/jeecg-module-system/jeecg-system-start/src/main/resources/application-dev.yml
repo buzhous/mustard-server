@@ -364,8 +364,11 @@ jeecg:
     ai:
       # OpenAI 兼容 base 地址（必填）
       base-url: https://api.deepseek.com
-      # API Key（必填，留空则 AI 不可用）
-      api-key: 
+      # API Key（必填，留空则 AI 不可用）——生产环境用环境变量注入，勿明文入库
+      api-key: sk-45488601f5b749f89db5e92268b879f2
+      # 模型分层：deepseek-chat（非推理，轻任务）/ deepseek-v4-flash（推理型，复杂判断）
+      chat-model: deepseek-chat
+      reasoner-model: deepseek-v4-flash
       # 模型名
       model: deepseek-v4-pro
       #确定性输出，默认temperature=0

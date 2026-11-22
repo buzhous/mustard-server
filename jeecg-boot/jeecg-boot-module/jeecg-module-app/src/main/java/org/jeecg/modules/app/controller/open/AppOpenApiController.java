@@ -40,6 +40,9 @@ public class AppOpenApiController {
     @Autowired
     private AppOpenService appOpenService;
 
+    @Autowired
+    private org.jeecg.modules.app.service.ItemFlowService itemFlowService;
+
     @Operation(summary = "物品分页查询（含 MIP 出域摘要 schemaId/contentHash）")
     @GetMapping("/item/list")
     public Result<Page<ItemInfo>> itemList(
@@ -188,6 +191,76 @@ public class AppOpenApiController {
             return withStatus(response, Result.error(400, "请求体不能为空"));
         }
         return withStatus(response, appOpenService.giftSend(credential, body.getString("giftToken"), body.getString("toUserId")));
+    }
+
+    // ================================ D1 定向流转（两阶段 offer/accept） ================================
+
+    @Operation(summary = "流转要约发起（readwrite；生成 flowToken 绑定接收方，TTL 72h，锁定期拒 gift/update/delete）")
+    @PostMapping("/flow/offer")
+    public Result<JSONObject> flowOffer(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, itemFlowService.offer(credential, body, idempotencyKey));
+    }
+
+    @Operation(summary = "流转确认（readwrite；仅接收方本人凭据可确认，账本 flow_out/flow_in 事件对）")
+    @PostMapping("/flow/accept")
+    public Result<JSONObject> flowAccept(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, itemFlowService.accept(credential,
+                body == null ? null : body.getString("flowToken"), idempotencyKey));
+    }
+
+    @Operation(summary = "流转拒绝（readwrite；仅接收方本人凭据，解锁回退不记账）")
+    @PostMapping("/flow/reject")
+    public Result<JSONObject> flowReject(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, itemFlowService.reject(credential,
+                body == null ? null : body.getString("flowToken"), idempotencyKey));
+    }
+
+    @Operation(summary = "流转撤回（readwrite；仅发起方凭据，解锁回退不记账）")
+    @PostMapping("/flow/cancel")
+    public Result<JSONObject> flowCancel(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, itemFlowService.cancel(credential,
+                body == null ? null : body.getString("flowToken"), idempotencyKey));
+    }
+
+    @Operation(summary = "流转要约列表（发出/收到两个方向，仅待处理；已完成以账本事件为准）")
+    @GetMapping("/flow/list")
+    public Result<JSONObject> flowList(
+            HttpServletRequest request,
+            @RequestParam(name = "dir", required = false) String dir) {
+        OpenAppCredential credential = credential(request);
+        return Result.OK(itemFlowService.list(credential.getBoundUid(), dir));
     }
 
     /**

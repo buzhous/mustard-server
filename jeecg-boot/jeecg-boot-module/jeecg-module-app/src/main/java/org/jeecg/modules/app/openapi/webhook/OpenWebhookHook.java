@@ -47,6 +47,8 @@ public class OpenWebhookHook {
             Map.entry("spawn", EVENT_ITEM_CHANGED),
             Map.entry("gift_out", EVENT_ITEM_FLOWED),
             Map.entry("gift_in", EVENT_ITEM_FLOWED),
+            Map.entry("flow_out", EVENT_ITEM_FLOWED),
+            Map.entry("flow_in", EVENT_ITEM_FLOWED),
             Map.entry("ruins_drop", EVENT_ITEM_FLOWED),
             Map.entry("ruins_pick", EVENT_ITEM_FLOWED),
             Map.entry("transfer", EVENT_ITEM_FLOWED));
