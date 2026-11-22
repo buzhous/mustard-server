@@ -1,10 +1,12 @@
 package org.jeecg.modules.app.mip;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.jeecg.modules.app.entity.ItemLineage;
 import org.jeecg.modules.app.mapper.ItemLineageMapper;
+import org.jeecg.modules.app.openapi.webhook.OpenWebhookHook;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,9 +31,11 @@ public class LineageService {
     public static final String OPERATOR_AGENT_PREFIX = "agent:";
 
     private final ItemLineageMapper lineageMapper;
+    private final OpenWebhookHook webhookHook;
 
-    public LineageService(ItemLineageMapper lineageMapper) {
+    public LineageService(ItemLineageMapper lineageMapper, OpenWebhookHook webhookHook) {
         this.lineageMapper = lineageMapper;
+        this.webhookHook = webhookHook;
     }
 
     /**
@@ -58,6 +62,9 @@ public class LineageService {
         if (draft.getOccurredAt() == null) {
             draft.setOccurredAt(new Date());
         }
+        // 时间归一到秒：tbl_item_lineage.occurred_at 为 DATETIME（秒精度），毫秒落库即截断，
+        // 若 hash 覆盖毫秒值则 verify 重算（读 DB 值）必然失配 → 统一截断到秒后再入哈希
+        draft.setOccurredAt(new Date((draft.getOccurredAt().getTime() / 1000) * 1000));
         // 取链尾：同 ori_id 最新一条事件
         ItemLineage last = lineageMapper.selectOne(new LambdaQueryWrapper<ItemLineage>()
                 .eq(ItemLineage::getOriId, draft.getOriId())
@@ -68,6 +75,8 @@ public class LineageService {
         draft.setHash(MipHashUtil.eventHash(prevHash, eventBody(draft)));
         try {
             lineageMapper.insert(draft);
+            // B4 Webhook：命中订阅者则入队（与业务同事务，异常不阻断业务与记账）
+            webhookHook.onAppended(draft);
             return draft;
         } catch (DuplicateKeyException e) {
             // 并发兜底：唯一约束拦截后返回既有事件
@@ -100,6 +109,38 @@ public class LineageService {
     }
 
     /**
+     * 链完整性校验 + 事件出域视图（开放平台 /app/open/item/lineage，设计方案 4.3）：
+     * 逐事件重算 MipHashUtil.eventHash(prevHash, eventBody) 比对存储 hash，并校验链式 prevHash 衔接。
+     * events 仅含出域最小字段集（opType/operator/prevHash/hash/occurredAt/qty），uid 均已哈希。
+     */
+    public JSONObject verify(String oriId) {
+        java.util.List<ItemLineage> chain = chain(oriId);
+        boolean chainValid = true;
+        String prevHash = MipHashUtil.GENESIS_PREV_HASH;
+        JSONArray events = new JSONArray();
+        for (ItemLineage e : chain) {
+            if (!matchesStoredHash(e) || !prevHash.equals(e.getPrevHash())) {
+                chainValid = false;
+            }
+            JSONObject ev = new JSONObject(true);
+            ev.put("opType", e.getEventType());
+            ev.put("operator", e.getOperator());
+            ev.put("prevHash", e.getPrevHash());
+            ev.put("hash", e.getHash());
+            ev.put("occurredAt", e.getOccurredAt() == null ? null : e.getOccurredAt().getTime());
+            ev.put("qty", e.getQty());
+            events.add(ev);
+            prevHash = e.getHash();
+        }
+        JSONObject out = new JSONObject(true);
+        out.put("chainValid", chainValid);
+        out.put("event_count", chain.size());
+        out.put("head_hash", chain.isEmpty() ? null : chain.get(chain.size() - 1).getHash());
+        out.put("events", events);
+        return out;
+    }
+
+    /**
      * uid 出链哈希：账本永不存明文 uid（MIP 协议 5.3 隐私规则）
      */
     public static String hashUid(String uid) {
@@ -120,6 +161,32 @@ public class LineageService {
     }
 
     // ================================ 私有方法 ================================
+
+    /**
+     * 单事件哈希重算（verify 用）：标准（DB 秒精度值）不中时，遍历 0-999ms 变体兼容
+     * 修复前存量事件（append 时 hash 覆盖了带毫秒值、落库被 DATETIME 截断）
+     */
+    private boolean matchesStoredHash(ItemLineage e) {
+        if (e.getHash() == null) {
+            return false;
+        }
+        if (MipHashUtil.eventHash(e.getPrevHash(), eventBody(e)).equals(e.getHash())) {
+            return true;
+        }
+        if (e.getOccurredAt() != null && e.getOccurredAt().getTime() % 1000 == 0) {
+            // DB 值毫秒已为 0：仅尝试存量原始毫秒变体
+            long base = e.getOccurredAt().getTime();
+            for (int ms = 1; ms <= 999; ms++) {
+                e.setOccurredAt(new Date(base + ms));
+                if (MipHashUtil.eventHash(e.getPrevHash(), eventBody(e)).equals(e.getHash())) {
+                    e.setOccurredAt(new Date(base));
+                    return true;
+                }
+            }
+            e.setOccurredAt(new Date(base));
+        }
+        return false;
+    }
 
     private ItemLineage selectByIdempotencyKey(String key) {
         if (key == null || key.isBlank()) {

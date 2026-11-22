@@ -28,6 +28,10 @@ public class ItemInfo implements Serializable {
 
     @TableId(type = IdType.ASSIGN_ID)
     @Schema(description = "id")
+    // Long 雪花 ID 超出 JS Number.MAX_SAFE_INTEGER，JSON 出参一律字符串（防前端精度丢失）
+    // Jackson 2 注解（Redis 等 Jackson2 序列化场景）+ Jackson 3 全限定注解（Spring Boot 4 HTTP 出参）
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.fasterxml.jackson.databind.ser.std.ToStringSerializer.class)
+    @tools.jackson.databind.annotation.JsonSerialize(using = tools.jackson.databind.ser.std.ToStringSerializer.class)
     private java.lang.Long id;
 
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
@@ -90,5 +94,15 @@ public class ItemInfo implements Serializable {
 
     @Schema(description = "仓位类型:1虚拟仓,2真实站点仓")
     private Integer stationType;
+
+    // ============ 开放平台出域摘要（非表字段，list 响应装配，设计方案 4.2）============
+
+    @Schema(description = "MIP 模板 schemaId（出域摘要，非表字段）")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String schemaId;
+
+    @Schema(description = "MIP 内容哈希 contentHash（出域摘要，非表字段）")
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String contentHash;
 
 }

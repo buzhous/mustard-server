@@ -1,13 +1,16 @@
 package org.jeecg.modules.app.service.impl;
 
+import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.SecureUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.entity.OpenAppCredential;
 import org.jeecg.modules.app.mapper.OpenAppCredentialMapper;
+import org.jeecg.modules.app.openapi.OpenScopeChecker;
 import org.jeecg.modules.app.service.IOpenAppCredentialService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -117,9 +120,67 @@ public class OpenAppCredentialServiceImpl
         this.removeById(credential.getId());
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenAppCredential updateScopeByUser(String uid, String credentialId, String scope) {
+        if (StrUtil.isEmpty(scope)
+                || !OpenScopeChecker.SCOPE_READONLY.equals(scope)
+                && !OpenScopeChecker.SCOPE_READWRITE.equals(scope)) {
+            throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
+        }
+        OpenAppCredential credential = getOwned(uid, credentialId);
+        credential.setScope(scope);
+        credential.setScopeUpdatedAt(new Date());
+        credential.setUpdateTime(new Date());
+        this.updateById(credential);
+        credential.setAppSecret(null);
+        return credential;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenAppCredential setWebhookByUser(String uid, String credentialId, String webhookUrl) {
+        String url = webhookUrl == null ? "" : webhookUrl.trim();
+        if (StrUtil.hasEmpty(uid, credentialId) || url.length() > 255
+                || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
+        }
+        OpenAppCredential credential = getOwned(uid, credentialId);
+        credential.setWebhookUrl(url);
+        // secret 每次配置重新生成（支持轮换），仅配置响应返回一次
+        credential.setWebhookSecret(IdUtil.simpleUUID());
+        credential.setUpdateTime(new Date());
+        this.updateById(credential);
+        return credential;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OpenAppCredential clearWebhookByUser(String uid, String credentialId) {
+        if (StrUtil.hasEmpty(uid, credentialId)) {
+            throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
+        }
+        OpenAppCredential credential = getOwned(uid, credentialId);
+        // updateById 忽略 null 字段，清空需 UpdateWrapper 显式置 null
+        this.update(new LambdaUpdateWrapper<OpenAppCredential>()
+                .eq(OpenAppCredential::getId, credential.getId())
+                .set(OpenAppCredential::getWebhookUrl, null)
+                .set(OpenAppCredential::getWebhookSecret, null)
+                .set(OpenAppCredential::getUpdateTime, new Date()));
+        // 同步内存对象，避免返回更新前的旧值
+        credential.setWebhookUrl(null);
+        credential.setWebhookSecret(null);
+        return credential;
+    }
+
     /**
      * 校验密钥归属：不存在或不属于当前用户均按参数错误处理
      */
+    @Override
+    public OpenAppCredential getOwnedByUser(String uid, String credentialId) {
+        return getOwned(uid, credentialId);
+    }
+
     private OpenAppCredential getOwned(String uid, String credentialId) {
         if (StrUtil.hasEmpty(uid, credentialId)) {
             throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);

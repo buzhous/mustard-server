@@ -27,6 +27,16 @@ public interface IItemGiftService extends IService<ItemGift> {
     ItemGiftRspVO createGift(ItemGiftReqVO reqVO, String userId);
 
     /**
+     * 创建赠送记录（指定账本 operator：开放平台 Agent 赠送传 LineageService.operatorAgent(appKey)）
+     *
+     * @param reqVO    赠送请求
+     * @param userId   赠送者用户ID
+     * @param operator 账本操作者标识（user / agent:xxxx）
+     * @return 赠送响应
+     */
+    ItemGiftRspVO createGift(ItemGiftReqVO reqVO, String userId, String operator);
+
+    /**
      * 领取赠送物品
      *
      * @param reqVO   领取请求

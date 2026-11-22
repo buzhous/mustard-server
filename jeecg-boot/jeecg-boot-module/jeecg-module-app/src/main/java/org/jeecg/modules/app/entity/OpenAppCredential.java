@@ -42,6 +42,21 @@ public class OpenAppCredential implements Serializable {
     @Schema(description = "数据范围绑定的App用户ID")
     private String boundUid;
 
+    @Schema(description = "权限分级：readonly/readwrite（默认 readonly）")
+    private String scope;
+
+    @Schema(description = "日调用配额，NULL=默认值（默认 5000）")
+    private Integer dailyQuota;
+
+    @Schema(description = "scope 最近变更时间")
+    private Date scopeUpdatedAt;
+
+    @Schema(description = "Webhook 回调地址（空为未订阅）")
+    private String webhookUrl;
+
+    @Schema(description = "Webhook 签名密钥（HMAC-SHA256）")
+    private String webhookSecret;
+
     @Schema(description = "状态：0停用 1启用")
     private Integer status;
 

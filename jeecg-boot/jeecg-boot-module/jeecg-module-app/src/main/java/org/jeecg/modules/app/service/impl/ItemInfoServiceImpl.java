@@ -124,6 +124,11 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
 
     @Override
     public boolean createItemInfo(ItemInfoCreateVO createVO) {
+        return this.createItemInfo(createVO, LineageService.OPERATOR_USER);
+    }
+
+    @Override
+    public boolean createItemInfo(ItemInfoCreateVO createVO, String operator) {
         if (ObjectUtil.isEmpty(createVO.getUserId()) || ObjectUtil.isEmpty(createVO.getOriId())) {
             throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
         }
@@ -133,8 +138,8 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
             createVO.setItemId(String.valueOf(itemInfo.getId()));
             return true;
         }
-        // 解析数据，生成物品
-        ItemInfo item = BeanUtil.copyProperties(createVO, ItemInfo.class);
+        // 解析数据，生成物品（List<FieldElementVO> → JSON 字符串：BeanUtil 对 List→String 会落 toString 破坏 MIP 契约）
+        ItemInfo item = FieldElementUtil.convertToJsonFields(createVO, new ItemInfo());
         item.setCreateTime(DateUtil.date());
         item.setUpdateTime(DateUtil.date());
         // MIP 写路径补级：fields 落库前追加 sensitivity（服务端单点计算，幂等）
@@ -149,7 +154,7 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
                     .setOriId(createVO.getOriId())
                     .setEventType(MipEventType.MINT.getCode())
                     .setToUid(LineageService.hashUid(createVO.getUserId()))
-                    .setOperator(LineageService.OPERATOR_USER)
+                    .setOperator(operator)
                     .setIdempotencyKey("mint:" + item.getId()));
         }
         createVO.setItemId(String.valueOf(item.getId()));

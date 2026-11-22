@@ -1,25 +1,24 @@
 package org.jeecg.modules.app.controller.open;
 
-import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoQueryVO;
 import org.jeecg.modules.app.entity.ItemInfo;
 import org.jeecg.modules.app.entity.OpenAppCredential;
-import org.jeecg.modules.app.mip.LineageService;
-import org.jeecg.modules.app.mip.MipInstanceBuilder;
-import org.jeecg.modules.app.mip.MipProfileBuilder;
-import org.jeecg.modules.app.mip.MipRedlineFilter;
-import org.jeecg.modules.app.service.IItemInfoService;
-import org.jeecg.modules.app.service.IOpenAppCredentialService;
+import org.jeecg.modules.app.openapi.OpenSignatureFilter;
+import org.jeecg.modules.app.service.AppOpenService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,10 +26,10 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 芥子开放平台数据接口（/app/open/**）
  *
- * 鉴权方式：仅 appKey（参数无需加密/签名）
- * - 请求头：appkey
- * - 数据范围：凭据绑定的用户（open_app_credentials.bound_uid）的物品数据。
- * - 该路径不走 AppAuthFilter（App 登录态），由本控制器独立校验 appKey。
+ * 鉴权：OpenSignatureFilter 统一守门（appkey 请求头 → 启用凭据 → IP 白名单 → scope 分级 → 限流 → 审计），
+ * 凭据经 request attribute {@link OpenSignatureFilter#ATTR_CREDENTIAL} 透传到本控制器。
+ * 数据范围：凭据绑定的用户（open_app_credentials.bound_uid）的物品数据。
+ * MIP 出域红线在 AppOpenService 内核完成（出口层不做手写字段过滤）。
  */
 @Slf4j
 @RestController
@@ -39,15 +38,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AppOpenApiController {
 
     @Autowired
-    private IOpenAppCredentialService openAppCredentialService;
+    private AppOpenService appOpenService;
 
-    @Autowired
-    private IItemInfoService itemInfoService;
-
-    @Autowired
-    private LineageService lineageService;
-
-    @Operation(summary = "物品分页查询")
+    @Operation(summary = "物品分页查询（含 MIP 出域摘要 schemaId/contentHash）")
     @GetMapping("/item/list")
     public Result<Page<ItemInfo>> itemList(
             HttpServletRequest request,
@@ -59,28 +52,17 @@ public class AppOpenApiController {
             @RequestParam(name = "status", required = false) Integer status,
             @RequestParam(name = "orderBy", required = false) String orderBy,
             @RequestParam(name = "ascending", required = false, defaultValue = "false") Boolean ascending) {
-        Result<OpenAppCredential> authResult = checkAppKey(request);
-        if (!authResult.isSuccess()) {
-            return Result.error(authResult.getMessage());
-        }
-        String boundUid = authResult.getResult().getBoundUid();
-        if (StrUtil.isEmpty(boundUid)) {
-            return Result.error("凭据未绑定数据范围用户，请联系平台管理员");
-        }
+        OpenAppCredential credential = credential(request);
         ItemInfoQueryVO queryVO = new ItemInfoQueryVO()
-                .setUserId(boundUid)
+                .setPageNo(pageNo)
+                .setPageSize(pageSize)
                 .setKeyword(keyword)
                 .setStationId(stationId)
                 .setStationType(stationType)
                 .setStatus(status)
                 .setOrderBy(orderBy)
-                .setAscending(ascending)
-                .setPageNo(pageNo)
-                .setPageSize(Math.min(pageSize, 100));
-        Page<ItemInfo> page = itemInfoService.listByCondition(queryVO);
-        // MIP 出域红线：列表轻量视图，fields 剥离 restricted 与 private（开放平台默认无 private 授权）
-        page.getRecords().forEach(r -> r.setFields(MipRedlineFilter.filterFieldsJson(r.getFields(), false)));
-        return Result.OK(page);
+                .setAscending(ascending);
+        return Result.OK(appOpenService.pageItems(credential.getBoundUid(), queryVO));
     }
 
     @Operation(summary = "物品详情（MIP 实例视图，红线过滤）")
@@ -88,63 +70,141 @@ public class AppOpenApiController {
     public Result<JSONObject> itemDetail(
             HttpServletRequest request,
             @RequestParam(name = "itemId") String itemId) {
-        Result<OpenAppCredential> authResult = checkAppKey(request);
-        if (!authResult.isSuccess()) {
-            return Result.error(authResult.getMessage());
-        }
+        OpenAppCredential credential = credential(request);
         if (StrUtil.isEmpty(itemId)) {
-            return Result.error("itemId 不能为空");
+            return Result.error(400, "itemId 不能为空");
         }
-        String boundUid = authResult.getResult().getBoundUid();
-        ItemInfo itemInfo = itemInfoService.queryItemInfo(itemId);
-        if (ObjectUtil.isEmpty(itemInfo) || !boundUid.equals(itemInfo.getUserId())) {
-            return Result.error("物品不存在或无权访问");
+        JSONObject instance = appOpenService.itemDetail(credential.getBoundUid(), itemId);
+        if (instance == null) {
+            return Result.error(404, "item not found");
         }
-        // MIP 实例视图：fields → attributes，装配标准实例后做红线过滤（restricted 一律剥离，
-        // private 未授权剥离，重算剥离视图 content_hash 并标记 filtered）
-        JSONObject profile = MipProfileBuilder.build(itemInfo.getFields(), null, null);
-        JSONObject instance = MipInstanceBuilder.build(
-                itemInfo.getOriId(), profile.getString("schema_id"), profile.getString("profile_version"),
-                itemInfo.getFields(), profile.toJSONString(),
-                itemInfo.getName(), itemInfo.getCategory(), itemInfo.getIcon(), itemInfo.getLevel(),
-                LineageService.hashUid(boundUid), itemInfo.getStationId(), itemInfo.getCreateTime(),
-                lineageService.digest(itemInfo.getOriId()));
-        return Result.OK(MipRedlineFilter.filter(instance, false));
+        return Result.OK(instance);
+    }
+
+    @Operation(summary = "物品搜索（轻量摘要，keyword 必填）")
+    @GetMapping("/item/search")
+    public Result<JSONObject> itemSearch(
+            HttpServletRequest request,
+            @RequestParam(name = "keyword") String keyword,
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @RequestParam(name = "fields", required = false) String fields) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(keyword)) {
+            return Result.error(400, "keyword 不能为空");
+        }
+        JSONObject out = new JSONObject(true);
+        out.put("keyword", keyword);
+        out.put("items", appOpenService.searchItems(credential.getBoundUid(), keyword, limit, fields));
+        return Result.OK(out);
+    }
+
+    @Operation(summary = "物品统计（仅聚合值）")
+    @GetMapping("/item/stats")
+    public Result<JSONObject> itemStats(HttpServletRequest request) {
+        OpenAppCredential credential = credential(request);
+        return Result.OK(appOpenService.stats(credential.getBoundUid()));
+    }
+
+    @Operation(summary = "流转记录（账本哈希链校验）")
+    @GetMapping("/item/lineage")
+    public Result<JSONObject> itemLineage(
+            HttpServletRequest request,
+            @RequestParam(name = "itemId") String itemId) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(itemId)) {
+            return Result.error(400, "itemId 不能为空");
+        }
+        JSONObject lineage = appOpenService.lineage(credential.getBoundUid(), itemId);
+        if (lineage == null) {
+            return Result.error(404, "item not found");
+        }
+        return Result.OK(lineage);
+    }
+
+    @Operation(summary = "Agent 新增物品（readwrite；X-Idempotency-Key 必填）")
+    @PostMapping("/item/add")
+    public Result<JSONObject> itemAdd(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, appOpenService.addItem(credential, body, idempotencyKey));
+    }
+
+    @Operation(summary = "编辑物品（readwrite；MIP 写入链，账本 update 事件，幂等回放）")
+    @PostMapping("/item/update")
+    public Result<JSONObject> itemUpdate(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, appOpenService.updateItem(credential, body, idempotencyKey));
+    }
+
+    @Operation(summary = "删除物品（readwrite；高危不可恢复，账本 recycle 事件，幂等回放）")
+    @PostMapping("/item/delete")
+    public Result<JSONObject> itemDelete(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (StrUtil.isEmpty(idempotencyKey)) {
+            return withStatus(response, Result.error(400, "missing idempotency key"));
+        }
+        return withStatus(response, appOpenService.deleteItem(credential, body, idempotencyKey));
+    }
+
+    @Operation(summary = "赠送预览（readwrite；返回一次性 giftToken，TTL 300s）")
+    @PostMapping("/gift/preview")
+    public Result<JSONObject> giftPreview(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        String itemId = body == null ? null : body.getString("itemId");
+        if (StrUtil.isEmpty(itemId)) {
+            return withStatus(response, Result.error(400, "itemId 不能为空"));
+        }
+        return withStatus(response, appOpenService.giftPreview(credential, itemId));
+    }
+
+    @Operation(summary = "赠送执行（readwrite；giftToken 一次性，赠送不可撤销）")
+    @PostMapping("/gift/send")
+    public Result<JSONObject> giftSend(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @RequestBody JSONObject body) {
+        OpenAppCredential credential = credential(request);
+        if (body == null) {
+            return withStatus(response, Result.error(400, "请求体不能为空"));
+        }
+        return withStatus(response, appOpenService.giftSend(credential, body.getString("giftToken"), body.getString("toUserId")));
     }
 
     /**
-     * appKey 校验（参数无需加密/签名）
+     * HTTP 状态与业务 code 同步（设计方案 3.6：422 携带校验明细、403/404 状态同步）
      */
-    private Result<OpenAppCredential> checkAppKey(HttpServletRequest request) {
-        String appKey = request.getHeader("appkey");
-        if (StrUtil.isEmpty(appKey)) {
-            return Result.error("缺少 appkey 请求头");
+    private Result<JSONObject> withStatus(HttpServletResponse response, Result<JSONObject> result) {
+        Integer code = result.getCode();
+        if (code != null && code >= 400) {
+            response.setStatus(code);
         }
-        OpenAppCredential credential = openAppCredentialService.getEnabledByAppKey(appKey);
-        if (ObjectUtil.isEmpty(credential)) {
-            return Result.error("无效的 appkey 或凭据已停用");
-        }
-        // IP 白名单
-        String whiteList = credential.getWhiteList();
-        if (StrUtil.isNotBlank(whiteList)) {
-            String clientIp = resolveClientIp(request);
-            boolean matched = StrUtil.split(whiteList, ',').stream()
-                    .anyMatch(ip -> ip.trim().equals(clientIp));
-            if (!matched) {
-                return Result.error("IP 未授权：" + clientIp);
-            }
-        }
-        return Result.OK(credential);
+        return result;
     }
 
-    private String resolveClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (StrUtil.isNotBlank(ip) && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        if (StrUtil.isBlank(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
+    /**
+     * 取 Filter 层鉴权通过的凭据（Filter 已完成 appkey/白名单/scope/限流）
+     */
+    private OpenAppCredential credential(HttpServletRequest request) {
+        return (OpenAppCredential) request.getAttribute(OpenSignatureFilter.ATTR_CREDENTIAL);
     }
 }

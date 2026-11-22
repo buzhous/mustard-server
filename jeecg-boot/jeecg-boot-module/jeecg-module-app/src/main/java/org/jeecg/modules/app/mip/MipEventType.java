@@ -11,6 +11,8 @@ public enum MipEventType {
 
     /** 建档（链首事件，协议上线后新建档） */
     MINT("mint", "建档"),
+    /** 编辑更新（开放接口/MCP 写路径，链内事件） */
+    UPDATE("update", "编辑更新"),
     /** 赠送发出 */
     GIFT_OUT("gift_out", "赠送发出"),
     /** 赠送领取 */

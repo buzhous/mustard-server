@@ -41,4 +41,28 @@ public interface IOpenAppCredentialService extends IService<OpenAppCredential> {
      * 用户删除单条密钥
      */
     void deleteByUser(String uid, String credentialId);
+
+    /**
+     * 用户设置密钥 scope 权限分级（readonly/readwrite 单向授权可随时回收）
+     *
+     * @return 更新后的凭据（不含敏感字段）
+     */
+    OpenAppCredential updateScopeByUser(String uid, String credentialId, String scope);
+
+    /**
+     * 配置 Webhook 回调地址（secret 每次配置重新生成，仅配置响应返回一次）
+     *
+     * @return 更新后的凭据（含 webhookSecret，调用方须仅本次下发）
+     */
+    OpenAppCredential setWebhookByUser(String uid, String credentialId, String webhookUrl);
+
+    /**
+     * 清除 Webhook 订阅（停止事件推送）
+     */
+    OpenAppCredential clearWebhookByUser(String uid, String credentialId);
+
+    /**
+     * 校验密钥归属（不存在或不属于当前用户抛参数错误）
+     */
+    OpenAppCredential getOwnedByUser(String uid, String credentialId);
 }

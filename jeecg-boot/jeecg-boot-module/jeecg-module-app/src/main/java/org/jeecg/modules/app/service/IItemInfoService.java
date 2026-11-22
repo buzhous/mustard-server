@@ -35,6 +35,15 @@ public interface IItemInfoService extends IService<ItemInfo> {
     boolean createItemInfo(ItemInfoCreateVO createVO);
 
     /**
+     * 创建物品信息（指定账本 operator：开放平台 Agent 写入传 LineageService.operatorAgent(appKey)）
+     *
+     * @param createVO 创建VO
+     * @param operator 账本操作者标识（user / agent:xxxx）
+     * @return 是否创建成功
+     */
+    boolean createItemInfo(ItemInfoCreateVO createVO, String operator);
+
+    /**
      * 创建物品信息（临时）
      *
      * @param itemInfoCreateVO 创建VO

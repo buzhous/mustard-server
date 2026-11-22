@@ -78,6 +78,12 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ItemGiftRspVO createGift(ItemGiftReqVO reqVO, String userId) {
+        return this.createGift(reqVO, userId, LineageService.OPERATOR_USER);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ItemGiftRspVO createGift(ItemGiftReqVO reqVO, String userId, String operator) {
         // 在途/待确认转移的物品锁定：不可赠送
         Long activeCount = itemStorageInMapper.selectCount(
                 new LambdaQueryWrapper<ItemStorageIn>()
@@ -140,7 +146,7 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
                 .setFromUid(LineageService.hashUid(userId))
                 .setToUid(GiftTypeEnum.DIRECT.getCode() == itemGift.getGiftType()
                         ? LineageService.hashUid(itemGift.getReceiverUserId()) : null)
-                .setOperator(LineageService.OPERATOR_USER)
+                .setOperator(operator)
                 .setQty(reqVO.getQuantity())
                 .setIdempotencyKey("gift_out:" + itemGift.getId()));
 
