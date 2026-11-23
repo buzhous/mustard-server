@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.modules.app.constant.AuthConstant;
@@ -15,6 +16,7 @@ import org.jeecg.modules.app.mapper.StatsEventMapper;
 import org.jeecg.modules.app.mapper.StatsDailyMapper;
 import org.jeecg.modules.app.service.StatsAggregateJob;
 import org.jeecg.modules.app.service.StatsEventService;
+import org.jeecg.modules.app.utils.SecurityTokenUtil;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -68,7 +70,7 @@ public class StatsController {
 
     @Operation(summary = "App 端批量上报（≤50 条，eventId 幂等，匿名仅限 app_launch）")
     @PostMapping("/track/batch")
-    public Result<JSONObject> trackBatch(@RequestBody JSONObject body) {
+    public Result<JSONObject> trackBatch(@RequestBody JSONObject body, HttpServletRequest request) {
         JSONArray arr = body.getJSONArray("events");
         if (arr == null || arr.isEmpty()) {
             return Result.error("events 不能为空");
@@ -76,9 +78,16 @@ public class StatsController {
         if (arr.size() > StatsEventService.MAX_BATCH) {
             return Result.error("单批最多 " + StatsEventService.MAX_BATCH + " 条");
         }
-        // 登录态由 AppAuthFilter 注入；track 路径已放行，故此处 header 为空即匿名
-        String uid = StrUtil.nullToEmpty(body.getString("uid"));
+        // 登录态优先从 X-Access-Token 解析（track 路径被 AppAuthFilter 放行，不会注入 x-uid，故此处自行解析）；
+        // 无 token / 解析失败视为匿名，不报错（app_launch 本就匿名上报）
+        String uid = resolveUid(request);
+        if (StrUtil.isBlank(uid)) {
+            uid = StrUtil.nullToEmpty(body.getString("uid"));
+        }
         String deviceId = StrUtil.nullToEmpty(body.getString("deviceId"));
+        // platform / appVersion 由客户端放在 body 顶层，整批复用
+        String platform = StrUtil.sub(body.getString("platform"), 0, 16);
+        String appVersion = StrUtil.sub(body.getString("appVersion"), 0, 16);
         String rateKey = StrUtil.isBlank(uid) ? deviceId : uid;
         if (rateKey.isEmpty()) {
             return Result.error("deviceId 不能为空");
@@ -104,8 +113,8 @@ public class StatsController {
                     .setEvent(event)
                     .setUid(uid)
                     .setDeviceId(deviceId)
-                    .setPlatform(StrUtil.sub(o.getString("platform"), 0, 16))
-                    .setAppVersion(StrUtil.sub(o.getString("appVersion"), 0, 16))
+                    .setPlatform(platform)
+                    .setAppVersion(appVersion)
                     .setProps(o.getJSONObject("props") == null ? "{}" : o.getJSONObject("props").toJSONString())
                     .setClientTs(o.getLong("ts"))
                     .setServerTs(System.currentTimeMillis());
@@ -119,6 +128,20 @@ public class StatsController {
         data.put("acceptedIds", accepted);
         data.put("accepted", accepted.size());
         return Result.OK(data);
+    }
+
+    /** track 路径被 AppAuthFilter 放行（不注入 x-uid），此处自行解析登录态 uid；无 token 或解析失败返回 null（匿名） */
+    private String resolveUid(HttpServletRequest request) {
+        String token = request.getHeader(AuthConstant.OAUTH_TOKEN_HEADER);
+        if (StrUtil.isEmpty(token) || token.split("\\.").length != 3) {
+            return null;
+        }
+        try {
+            var jwt = SecurityTokenUtil.parseJwtToken(token);
+            return jwt == null ? null : jwt.getStr(AuthConstant.JWT_UID_HEADER);
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     // ==================== 运营看板（admin） ====================
