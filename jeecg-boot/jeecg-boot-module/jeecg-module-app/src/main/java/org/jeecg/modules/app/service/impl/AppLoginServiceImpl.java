@@ -19,6 +19,7 @@ import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.login.UserLoginReqVO;
+import org.jeecg.modules.app.constant.AuthConstant;
 import org.jeecg.modules.app.constant.UserConstant;
 import org.jeecg.modules.app.mapper.AppUserMapper;
 import org.jeecg.modules.app.service.IAppLoginService;
@@ -274,6 +275,53 @@ public class AppLoginServiceImpl extends ServiceImpl<AppUserMapper, AppUser> imp
         tokenDTO.setToken(newToken);
 
         return tokenDTO;
+    }
+
+    @Override
+    public UserTokenDTO refreshToken(String accessToken) {
+        if (StrUtil.isEmpty(accessToken)) {
+            return null;
+        }
+        // 仅校验签名与 claims，不校验过期时间（过期由宽限期逻辑处理）。
+        // SecurityTokenUtil 返回 hutool JSONObject，与文件内 fastjson JSONObject 区分，使用全限定名
+        cn.hutool.json.JSONObject claims = SecurityTokenUtil.parseJwtTokenIgnoreExpiry(accessToken);
+        if (claims == null) {
+            return null;
+        }
+        String uid = claims.getStr(AuthConstant.JWT_UID_HEADER);
+        if (StrUtil.isEmpty(uid)) {
+            return null;
+        }
+        // 过期宽限判断：签发侧 expireTime 为毫秒时间戳；兼容历史秒级存储
+        Object expireRaw = claims.get("expireTime");
+        Long expireMs = null;
+        if (expireRaw != null) {
+            String raw = String.valueOf(expireRaw);
+            Long parsed = parseLongQuietly(raw);
+            if (parsed != null && parsed > 0) {
+                expireMs = parsed < 100_000_000_000L ? parsed * 1000L : parsed;
+            }
+        }
+        long now = System.currentTimeMillis();
+        if (expireMs != null && now >= expireMs + SecurityTokenUtil.REFRESH_GRACE_MS) {
+            return null;
+        }
+        AppUser appUser = this.getById(uid);
+        if (appUser == null) {
+            return null;
+        }
+        UserTokenDTO tokenDTO = createNewToken(appUser);
+        // 存量 token 缓存存在则续期，保持登录态缓存与新 token 一致
+        cacheAndRefreshToken(appUser, tokenDTO.getToken());
+        return tokenDTO;
+    }
+
+    private Long parseLongQuietly(String raw) {
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override

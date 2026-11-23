@@ -44,6 +44,15 @@ public interface IAppLoginService extends IService<AppUser> {
 
     UserTokenDTO createNewToken(AppUser appUser);
 
+    /**
+     * Token 续期：签名有效且未超过过期宽限期（7 天）的老 token 换取新 token；
+     * 签名无效、用户不存在或超过宽限期返回 null
+     *
+     * @param accessToken 老 token
+     * @return 新 token，不可续期返回 null
+     */
+    UserTokenDTO refreshToken(String accessToken);
+
     boolean verifySmsCode(String phone, String smsCode);
 
 }

@@ -165,6 +165,27 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public int purgeAllRecycle(String userId) {
+        List<ItemRecycle> all = this.list(new QueryWrapper<ItemRecycle>().lambda()
+                .eq(ItemRecycle::getUserId, userId)
+                .eq(ItemRecycle::getStatus, STATUS_IN));
+        int count = 0;
+        for (ItemRecycle recycle : all) {
+            this.baseMapper.deleteById(recycle.getId());
+            itemSyncMapper.delete(new QueryWrapper<ItemSync>().lambda()
+                    .eq(ItemSync::getOriId, recycle.getOriId())
+                    .eq(ItemSync::getUserId, userId)
+                    .eq(ItemSync::getItemId, recycle.getItemId())
+                    .eq(ItemSync::getStatus, SyncStatusEnum.DESTROYED.getCode()));
+            // MIP 流转账本：用户主动清空同样为 destroy 终止事件（operator=user）
+            appendPurgeLineage(recycle, LineageService.OPERATOR_USER);
+            count++;
+        }
+        return count;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public int purgeExpiredRecycle() {
         Date expireTime = DateUtil.offsetDay(DateUtil.date(), -RECYCLE_KEEP_DAYS);
         List<ItemRecycle> expired = this.list(new QueryWrapper<ItemRecycle>().lambda()

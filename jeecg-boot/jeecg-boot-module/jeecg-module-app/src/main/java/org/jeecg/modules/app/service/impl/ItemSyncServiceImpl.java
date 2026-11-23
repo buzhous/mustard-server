@@ -298,14 +298,14 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         int inventoryQuantity = ObjectUtil.isEmpty(inventory.getQuantity()) ? 0 : inventory.getQuantity();
         int destroyQuantity = ObjectUtil.isEmpty(syncVO.getQuantity()) ? inventoryQuantity : syncVO.getQuantity();
 
-        // 库存已清零时销毁视为幂等完成：直接标记销毁并掉落废墟/回收站，
-        // 避免同步队列重试时反复报“物品数量不足”卡死队列
+        // 库存已清零视为幂等完成；声明的销毁数量大于服务端库存（多端操作/历史扣减导致漂移）时
+        // 按剩余库存收敛扣减。均避免同步队列重试时反复报“物品数量不足”卡死队列
         if (inventoryQuantity == 0) {
             return destroyItemCompletely(itemSyncExist, syncVO.getVersion(), toRecycle);
         }
 
         if (destroyQuantity > inventoryQuantity) {
-            throw new AppException(ExceptionEnum.INSUFFICIENT_QUANTITY);
+            destroyQuantity = inventoryQuantity;
         }
 
         if (destroyQuantity >= inventoryQuantity) {

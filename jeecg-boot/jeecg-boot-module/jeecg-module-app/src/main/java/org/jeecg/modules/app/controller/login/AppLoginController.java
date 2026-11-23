@@ -13,6 +13,7 @@ import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.login.UserLoginReqVO;
 import org.jeecg.modules.app.bean.vo.login.UserLoginRespVO;
+import org.jeecg.modules.app.constant.AuthConstant;
 import org.jeecg.modules.app.service.IAppLoginService;
 import org.jeecg.modules.app.utils.AppAuthUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,6 +67,24 @@ public class AppLoginController {
             }
         }
         UserTokenDTO tokenDTO = loginService.login(loginReqVO);
+        UserLoginRespVO respVO = new UserLoginRespVO();
+        respVO.setAccessToken(tokenDTO.getToken());
+        respVO.setExpireTime(tokenDTO.getExpireTime());
+        return Result.OK(respVO);
+    }
+
+    @Operation(summary = "Token续期", description = "老token（签名有效且未超过宽限期）换取新token，供App静默自愈使用")
+    @PostMapping("/refreshToken")
+    public Result<UserLoginRespVO> refreshToken(
+            // 注解要求常量，AuthConstant.OAUTH_TOKEN_HEADER 非常量字段，此处取同值字面量 "x-access-token"
+            @RequestHeader(value = "x-access-token", required = false) String accessToken) {
+        if (StrUtil.isEmpty(accessToken)) {
+            return Result.error(401, "Invalid Token");
+        }
+        UserTokenDTO tokenDTO = loginService.refreshToken(accessToken);
+        if (tokenDTO == null) {
+            return Result.error(401, "Invalid Token");
+        }
         UserLoginRespVO respVO = new UserLoginRespVO();
         respVO.setAccessToken(tokenDTO.getToken());
         respVO.setExpireTime(tokenDTO.getExpireTime());

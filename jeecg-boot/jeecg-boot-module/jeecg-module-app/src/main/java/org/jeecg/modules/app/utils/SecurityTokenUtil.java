@@ -24,6 +24,11 @@ public class SecurityTokenUtil {
      */
     public static Long EXPIRE_TIME_SECOND = 60 * 60 * 24 * 30 * 12L;
 
+    /**
+     * Token 续期宽限期：过期 30 天内仍可通过 refreshToken 静默续期，超过则拒绝
+     */
+    public static Long REFRESH_GRACE_MS = 1000L * 60 * 60 * 24 * 30L;
+
     public static Long expireTime() {
         return System.currentTimeMillis() + EXPIRE_TIME;
     }
@@ -65,6 +70,30 @@ public class SecurityTokenUtil {
             // 判断imei和uid格式
             // ...
             // ================================================================================
+            return jwt.getPayload().getClaimsJson();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * 仅校验签名与必要 claims，不校验过期时间（供 token 续期的宽限判断使用）。
+     * 签名无效或 claims 缺失返回 null；有效返回 claims JSON，
+     * 其中 expireTime 为签发时的原始值（毫秒时间戳），是否过期/在宽限期内由调用方判断
+     */
+    public static JSONObject parseJwtTokenIgnoreExpiry(String token) {
+        try {
+            JWT jwt = JWTUtil.parseToken(token);
+            // 签名校验
+            if (!jwt.setKey(JWT_SECRET.getBytes()).verify()) {
+                return null;
+            }
+            if (jwt.getPayload().getClaim(AuthConstant.JWT_UID_HEADER) == null
+                    || jwt.getPayload().getClaim("imei") == null
+                    || jwt.getPayload().getClaim("expireTime") == null) {
+                return null;
+            }
             return jwt.getPayload().getClaimsJson();
         } catch (Exception e) {
             e.printStackTrace();

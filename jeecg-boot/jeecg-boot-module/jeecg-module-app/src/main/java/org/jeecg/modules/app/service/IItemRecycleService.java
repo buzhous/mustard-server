@@ -33,6 +33,11 @@ public interface IItemRecycleService extends IService<ItemRecycle> {
     boolean purgeRecycle(String userId, String recycleId, String itemId);
 
     /**
+     * 清空本人回收站：全部未恢复记录一次性彻底删除，返回清除条数
+     */
+    int purgeAllRecycle(String userId);
+
+    /**
      * 清理超期回收站：删除 30 天前未恢复的记录（定时任务调用），返回清理条数
      */
     int purgeExpiredRecycle();

@@ -67,4 +67,15 @@ public class AppRecycleController {
         return Result.OK("已彻底删除");
     }
 
+    @Operation(summary = "清除全部（清空本人回收站，不可恢复）")
+    @PostMapping("/purgeAll")
+    public Result<String> purgeAll() {
+        AppUser loginUser = AppAuthUtil.getUserInfo();
+        if (ObjectUtil.isEmpty(loginUser)) {
+            throw new AppException(ExceptionEnum.USER_INFO_NOT_EXIST);
+        }
+        int count = itemRecycleService.purgeAllRecycle(loginUser.getId());
+        return Result.OK("已清除 " + count + " 条记录");
+    }
+
 }
