@@ -401,7 +401,13 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         if (ObjectUtil.isEmpty(itemIds)) {
             return;
         }
-        Map<String, org.jeecg.modules.app.entity.ItemInfo> itemInfoMap = itemInfoService.listByIds(itemIds)
+        // 仅投影 3 列：全量拉取时避免经 WAN 传输整行（fields 等大列），慢库带宽下可省 ~60s
+        Map<String, org.jeecg.modules.app.entity.ItemInfo> itemInfoMap = itemInfoService
+                .list(new LambdaQueryWrapper<org.jeecg.modules.app.entity.ItemInfo>()
+                        .in(org.jeecg.modules.app.entity.ItemInfo::getId, itemIds)
+                        .select(org.jeecg.modules.app.entity.ItemInfo::getId,
+                                org.jeecg.modules.app.entity.ItemInfo::getStationId,
+                                org.jeecg.modules.app.entity.ItemInfo::getStationType))
                 .stream()
                 .collect(java.util.stream.Collectors.toMap(
                         info -> String.valueOf(info.getId()), info -> info, (a, b) -> a));
@@ -497,6 +503,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
 
         rspVO.setNeedDeleteList(needDeleteList);
         rspVO.setTotalCount(needAddOrUpdateList.size() + needDeleteList.size());
+        // 全量记录总数（不滤 update_time）：客户端据此发现"水位线越前导致增量拉空但服务端有数据"的漏拉场景
+        rspVO.setTotal(this.count(new LambdaQueryWrapper<ItemSync>().eq(ItemSync::getUserId, syncVO.getUserId())));
         rspVO.setHasMore(false);
 
         return rspVO;

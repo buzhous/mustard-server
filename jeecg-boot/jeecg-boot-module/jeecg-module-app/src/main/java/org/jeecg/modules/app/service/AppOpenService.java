@@ -6,10 +6,12 @@ import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.util.RedisUtil;
+import org.jeecg.modules.app.bean.enums.SyncStatusEnum;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftReqVO;
 import org.jeecg.modules.app.bean.vo.gift.ItemGiftRspVO;
 import org.jeecg.modules.app.bean.vo.inventory.ItemInventoryVO;
@@ -17,6 +19,7 @@ import org.jeecg.modules.app.bean.vo.item.ItemInfoCreateVO;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoQueryVO;
 import org.jeecg.modules.app.bean.vo.fields.FieldElementVO;
 import org.jeecg.modules.app.entity.ItemInfo;
+import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.OpenAppCredential;
 import org.jeecg.modules.app.mip.LineageService;
 import org.jeecg.modules.app.mip.MipAttributesCodec;
@@ -72,6 +75,9 @@ public class AppOpenService {
 
     @Autowired
     private IItemUserInventoryService itemUserInventoryService;
+
+    @Autowired
+    private IItemSyncService itemSyncService;
 
     @Autowired
     private LineageService lineageService;
@@ -298,6 +304,11 @@ public class AppOpenService {
                 .setUserId(credential.getBoundUid())
                 .setQuantity(quantity == null || quantity <= 0 ? 1 : quantity);
         itemUserInventoryService.createItemUserInventory(inventoryVO);
+        // 回写同步队列表：App 增量下载仅读 tbl_item_sync，缺失会导致服务端创建的物品在物品栏不可见
+        syncItemToQueue(oriId, credential.getBoundUid(), String.valueOf(createVO.getItemId()),
+                inventoryVO.getId() == null ? null : String.valueOf(inventoryVO.getId()),
+                sync.category(), sync.name(), sync.icon(), sync.level(), quantity,
+                confidence >= CONFIDENCE_THRESHOLD ? 1 : 0, fieldsJson);
         // 返回 MIP 出域实例 + 入库状态（normal/draft）
         ItemInfo created = itemInfoService.queryItemInfo(createVO.getItemId());
         JSONObject instance = buildOutboundInstance(created, credential.getBoundUid(), true);
@@ -305,6 +316,58 @@ public class AppOpenService {
         result.setMessage(confidence >= CONFIDENCE_THRESHOLD ? "normal" : "draft");
         redisUtil.set(idemKey, JSON.toJSONString(result), IDEM_TTL_SECONDS);
         return result;
+    }
+
+    /**
+     * 回写同步队列表（tbl_item_sync）：open/AI 链路创建/编辑的物品补写同步记录。
+     * App 的 syncDownloadIncremental 仅读该表（user_id + update_time 增量），
+     * 缺失记录会导致物品在 App 物品栏不可见。回写失败不影响创建/编辑主链路。
+     */
+    private void syncItemToQueue(String oriId, String userId, String itemId, String inventoryId,
+                                 String categoryId, String name, String icon, Integer level,
+                                 Integer quantity, Integer status, String fieldsJson) {
+        try {
+            java.util.Date now = new java.util.Date();
+            ItemSync exist = itemSyncService.getOne(new LambdaQueryWrapper<ItemSync>()
+                    .eq(ItemSync::getItemId, itemId)
+                    .eq(ItemSync::getUserId, userId)
+                    .last("limit 1"));
+            if (exist != null) {
+                ItemSync syncPatch = new ItemSync();
+                syncPatch.setId(exist.getId());
+                syncPatch.setName(name);
+                syncPatch.setIcon(icon);
+                syncPatch.setCategoryId(StrUtil.blankToDefault(categoryId, "0"));
+                syncPatch.setLevel(level);
+                syncPatch.setQuantity(quantity);
+                syncPatch.setStatus(status);
+                syncPatch.setFields(fieldsJson);
+                syncPatch.setVersion(ObjectUtil.defaultIfNull(exist.getVersion(), 0) + 1);
+                syncPatch.setSyncStatus(SyncStatusEnum.SUCCESS.getCode());
+                syncPatch.setUpdateTime(now);
+                itemSyncService.updateById(syncPatch);
+            } else {
+                ItemSync itemSync = new ItemSync();
+                itemSync.setOriId(oriId);
+                itemSync.setUserId(userId);
+                itemSync.setItemId(itemId);
+                itemSync.setInventoryId(inventoryId);
+                itemSync.setCategoryId(StrUtil.blankToDefault(categoryId, "0"));
+                itemSync.setName(name);
+                itemSync.setIcon(icon);
+                itemSync.setLevel(level);
+                itemSync.setQuantity(quantity == null ? 1 : quantity);
+                itemSync.setStatus(status);
+                itemSync.setFields(fieldsJson);
+                itemSync.setVersion(1);
+                itemSync.setSyncStatus(SyncStatusEnum.SUCCESS.getCode());
+                itemSync.setCreateTime(now);
+                itemSync.setUpdateTime(now);
+                itemSyncService.save(itemSync);
+            }
+        } catch (Exception e) {
+            log.warn("[open] 同步队列表回写失败 itemId={}", itemId, e);
+        }
     }
 
     /**
@@ -398,6 +461,15 @@ public class AppOpenService {
         if (!ok) {
             return Result.error(500, "物品更新失败");
         }
+        // 回写同步队列表（编辑同样补写/升版，保证 App 增量可见）
+        org.jeecg.modules.app.entity.ItemUserInventory openInv = itemUserInventoryService
+                .queryUserItem(credential.getBoundUid(), String.valueOf(exists.getId()));
+        syncItemToQueue(exists.getOriId(), credential.getBoundUid(), String.valueOf(exists.getId()),
+                openInv == null ? null : String.valueOf(openInv.getId()),
+                sync.category(), sync.name(), sync.icon(), sync.level(), null,
+                confidence == null ? exists.getStatus()
+                        : (confidence >= CONFIDENCE_THRESHOLD ? 1 : 0),
+                fieldsJson);
         // 账本：update（自持事件，from=to=当前用户）
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(exists.getOriId())
@@ -625,7 +697,15 @@ public class AppOpenService {
         String type = MipComponentRegistry.valueType(element);
         if (value instanceof JSONArray arr) {
             switch (type == null ? "" : type) {
-                case "arrstr" -> content.put("tags", arr);
+                case "arrstr" -> {
+                    // 规范形态 [{name,...}]（ElementContentVO.tags 为对象数组）：纯字符串归一为 {name}
+                    JSONArray tagList = new JSONArray();
+                    for (Object t : arr) {
+                        tagList.add(t instanceof JSONObject o ? o
+                                : new JSONObject(true).fluentPut("name", String.valueOf(t)));
+                    }
+                    content.put("tags", tagList);
+                }
                 case "arrobj" -> content.put("attributes", arr);
                 case "arrurl" -> {
                     JSONArray medias = new JSONArray();

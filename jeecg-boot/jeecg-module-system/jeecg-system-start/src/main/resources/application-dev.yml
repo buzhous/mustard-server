@@ -200,6 +200,13 @@ jeecg:
     timeout: 60
     skills-dir:
     skills-shell-dir:
+    # AI 建档技能（mustard-item-filing-v1）模型配置：OPENAI 兼容协议，换模型只改此三行（§5.7）
+    item-filing:
+      base-url: https://api.deepseek.com
+      api-key: sk-45488601f5b749f89db5e92268b879f2
+      chat-model: deepseek-chat
+      temperature: 0
+      max-tokens: 8192
     # AI聊天助手访问限流配置
     # 单项为空或小于等于 0 时，不限制对应访问频次
     rate-limit:
