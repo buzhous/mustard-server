@@ -40,6 +40,8 @@ public class AppAuthFilter implements Filter {
         if (url.contains("/app/login") || url.contains("/app/open/") || url.contains("/app/article")
                 || url.contains("/app/kuaidi/callback") || url.contains("/app/stats/track")
                 || url.contains("/app/stats/admin/")
+                || url.contains("/app/version/latest")
+                || url.contains("/app/version/admin/")
                 || !url.contains("/app/")) {
             chain.doFilter(request, response);
             return;
