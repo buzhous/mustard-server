@@ -11,8 +11,8 @@ import java.net.HttpURLConnection;
 import java.util.List;
 
 /**
- * OPENAI 兼容协议适配器（DeepSeek 走此实现；GPT/QWEN/智谱兼容端点仅换配置即用）。
- * 配置源：application-*.yml jeecg.ai.*（base-url / api-key / chat-model / temperature / max-tokens）。
+ * OPENAI 兼容协议适配器（DeepSeek deepseek-flash 走此实现；GPT/QWEN-VL/智谱兼容端点仅换配置即用）。
+ * 配置源：application-*.yml jeecg.ai-chat.item-filing.*（base-url / api-key / chat-model / thinking / temperature / max-tokens）。
  */
 @Slf4j
 @Component
@@ -24,7 +24,7 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
     @Value("${jeecg.ai-chat.item-filing.api-key:}")
     private String apiKey;
 
-    @Value("${jeecg.ai-chat.item-filing.chat-model:deepseek-chat}")
+    @Value("${jeecg.ai-chat.item-filing.chat-model:deepseek-flash}")
     private String chatModel;
 
     @Value("${jeecg.ai-chat.item-filing.temperature:0}")
@@ -32,6 +32,14 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
 
     @Value("${jeecg.ai-chat.item-filing.max-tokens:8192}")
     private Integer maxTokens;
+
+    /**
+     * 思考模式开关（DeepSeek 官方参数 thinking.type：enabled/disabled）。
+     * 官方默认 enabled，但思考模式下 temperature/top_p 等参数不生效；
+     * 建档结构化解析需要确定性输出 → 默认 disabled，可用配置开启。
+     */
+    @Value("${jeecg.ai-chat.item-filing.thinking:disabled}")
+    private String thinking;
 
     @Override
     public String structured(String systemPrompt, String userContent) {
@@ -54,9 +62,33 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
 
     @Override
     public String vision(List<String> imageUrls, String text) {
-        // vision provider 注册位：QWEN-VL Key 就绪后在此实现（多模态 message content 数组协议）。
-        // 当前未提供 Key → 返回 null，编排器降级口述模式（tool_schema.json vision_describe.fallback）。
-        return null;
+        // DeepSeek deepseek-flash 官方支持图像理解（JPEG/PNG/GIF/WebP），content 为 OpenAI 兼容 block 数组：
+        // url 支持 http(s) 外链（≤8192 字符、需公网可达）或 base64 data URL；
+        // QWEN-VL / GPT-4o 等兼容端点同为该多模态协议，换模型无需改代码。
+        // 返回 null → 编排器口述降级；调用失败抛异常 → 编排器捕获后同样降级。
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return null;
+        }
+        JSONArray content = new JSONArray();
+        if (text != null && !text.isBlank()) {
+            content.add(new JSONObject(true).fluentPut("type", "text").fluentPut("text", text));
+        }
+        for (String url : imageUrls) {
+            if (url == null || url.isBlank()) {
+                continue;
+            }
+            content.add(new JSONObject(true)
+                    .fluentPut("type", "image_url")
+                    .fluentPut("image_url", new JSONObject(true).fluentPut("url", url)));
+        }
+        if (content.isEmpty()) {
+            return null;
+        }
+        JSONArray msgs = new JSONArray();
+        msgs.add(new JSONObject(true).fluentPut("role", "user").fluentPut("content", content));
+        JSONObject body = baseBody(null, null);
+        body.put("messages", msgs);
+        return post(body);
     }
 
     // ================================ 私有工具 ================================
@@ -72,6 +104,10 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
         JSONObject body = new JSONObject(true);
         body.put("model", chatModel);
         body.put("messages", msgs);
+        // DeepSeek 新增参数：思考模式开关（官方默认 enabled；思考模式下 temperature 不生效，建档需确定性输出 → 默认 disabled）
+        if (thinking != null && !thinking.isBlank()) {
+            body.put("thinking", new JSONObject(true).fluentPut("type", thinking.trim()));
+        }
         body.put("temperature", temperature == null ? 0 : temperature);
         body.put("max_tokens", maxTokens == null ? 8192 : maxTokens);
         body.put("stream", false);

@@ -21,7 +21,6 @@ import org.jeecg.modules.app.service.impl.AiChatSessionServiceImpl;
 import org.jeecg.modules.app.service.impl.OpenAppCredentialServiceImpl;
 import org.jeecg.modules.app.bean.vo.ai.AiChatCreateVO;
 import org.jeecg.modules.app.bean.vo.ai.AiChatSendVO;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
@@ -59,9 +58,6 @@ public class AiAgentService {
     private final AppOpenService appOpenService;
     private final AiModelAdapter modelAdapter;
     private final AiRateLimiter rateLimiter;
-
-    @Value("${jeecg.ai-chat.default-item-icon:https://mustard.example.com/icon.png}")
-    private String defaultIcon;
 
     private volatile String promptTemplate;
 
@@ -287,14 +283,19 @@ public class AiAgentService {
     // ================================ 私有：解析与组装 ================================
 
     /**
-     * 视觉链：vision provider 缺失 → 口述降级（用户话术即物品描述，tool_schema.json fallback=verbatim）
+     * 视觉链：deepseek-flash 图像理解（vision）→ 失败/未配置时口述降级（用户话术即物品描述，tool_schema.json fallback=verbatim）
      */
     private String resolveVision(List<String> images, String text) {
         if (images.isEmpty()) {
             return null;
         }
-        String v = modelAdapter.vision(images, text);
-        return v != null ? v : text; // 口述模式
+        try {
+            String v = modelAdapter.vision(images, text);
+            return v != null ? v : text; // vision 未实现/无图 → 口述模式
+        } catch (Exception e) {
+            log.warn("AI vision 调用失败，降级口述模式: {}", e.getMessage());
+            return text; // 口述模式
+        }
     }
 
     private String recentHistory(String uid, String sessionId) {
@@ -477,10 +478,10 @@ public class AiAgentService {
         attributes.add(attr(1, str(draft, "name")));
         JSONObject icon = draft.getJSONObject("icon");
         String iconUrl = icon == null ? null : StrUtil.trimToNull(icon.getString("value"));
-        if (iconUrl == null || !(iconUrl.startsWith("http://") || iconUrl.startsWith("https://"))) {
-            iconUrl = defaultIcon;
+        // 图标缺失或非法 URL 时不填充占位域名，App 端按空图标走本地占位展示
+        if (iconUrl != null && (iconUrl.startsWith("http://") || iconUrl.startsWith("https://"))) {
+            attributes.add(attr(2, iconUrl));
         }
-        attributes.add(attr(2, iconUrl));
         attributes.add(attr(3, str(draft, "category")));
         String desc = str(draft, "description");
         if (StrUtil.isNotBlank(desc)) {

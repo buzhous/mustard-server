@@ -131,13 +131,14 @@ public class LLMConsts {
     public static final Set<String> DEEPSEEK_THINKING_MODELS = new HashSet<>(Arrays.asList(
             "deepseek-reasoner",
             "deepseek-v4-flash",
-            "deepseek-v4-pro"
+            "deepseek-v4-pro",
+            "deepseek-flash"
     ));
 
     /**
      * 判断指定模型名是否为 DeepSeek 推理模型(返回 reasoning_content 字段)
-     * 匹配规则：先做大小写不敏感的精确匹配，再做关键字包含匹配(reasoner/v4-flash/v4-pro)
-     * 以兼容带版本后缀的变体(如 deepseek-v4-flash-0428)
+     * 匹配规则：先做大小写不敏感的精确匹配，再做关键字包含匹配(reasoner/v4-flash/v4-pro/deepseek-flash)
+     * 以兼容带版本后缀的变体(如 deepseek-v4-flash-0428、deepseek-flash-0915)
      *
      * @param modelName 模型名(大小写不敏感、首尾空白容错)
      * @return true=推理模型；false=非推理模型或空
@@ -153,7 +154,8 @@ public class LLMConsts {
         // 兼容带版本后缀或厂商前缀的变体
         return name.contains("reasoner")
                 || name.contains("v4-flash")
-                || name.contains("v4-pro");
+                || name.contains("v4-pro")
+                || name.contains("deepseek-flash");
     }
     //update-end---author:scott ---date:20260429  for：[issues/9585]DeepSeek大模型切换为新发布deepseek-v4-flash，流程中调用出现异常------------
 

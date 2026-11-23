@@ -204,7 +204,10 @@ jeecg:
     item-filing:
       base-url: https://api.deepseek.com
       api-key: sk-45488601f5b749f89db5e92268b879f2
-      chat-model: deepseek-chat
+      # 基础模型：deepseek-flash（官方最新，支持图像理解；deepseek-chat/reasoner 将于 2026/07/24 弃用）
+      chat-model: deepseek-flash
+      # 思考模式开关（官方参数 thinking.type）：思考模式下 temperature 不生效，建档需确定性 JSON 输出 → disabled
+      thinking: disabled
       temperature: 0
       max-tokens: 8192
     # AI聊天助手访问限流配置
