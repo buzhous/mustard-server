@@ -1,5 +1,8 @@
 package org.jeecg.modules.app.service.impl;
 
+import org.jeecg.modules.app.service.StatsEventService;
+import org.springframework.beans.factory.annotation.Autowired;
+
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.SecureUtil;
@@ -30,6 +33,9 @@ public class OpenAppCredentialServiceImpl
 
     /** 密钥名称最大长度 */
     private static final int MAX_APP_NAME_LENGTH = 20;
+
+    @Autowired
+    private StatsEventService statsEventService;
 
     @Override
     public OpenAppCredential getEnabledByAppKey(String appKey) {
@@ -100,6 +106,8 @@ public class OpenAppCredentialServiceImpl
         credential.setStatus(1);
         credential.setUpdateTime(new Date());
         this.updateById(credential);
+        // F1 运营统计：AppKey 激活成功（status 0→1）
+        statsEventService.fire("appkey_activated", uid, null);
         return credential;
     }
 

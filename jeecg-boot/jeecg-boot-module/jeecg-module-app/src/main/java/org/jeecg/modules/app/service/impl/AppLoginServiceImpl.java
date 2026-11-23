@@ -1,5 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
+import org.jeecg.modules.app.service.StatsEventService;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Validator;
@@ -229,6 +231,9 @@ public class AppLoginServiceImpl extends ServiceImpl<AppUserMapper, AppUser> imp
         return tokenDTO;
     }
 
+    @Autowired
+    private StatsEventService statsEventService;
+
     public AppUser registerUser(UserLoginReqVO loginVO) {
         AppUser appUser = new AppUser();
         String nickname = RandomUtil.randomString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 10);
@@ -255,6 +260,10 @@ public class AppLoginServiceImpl extends ServiceImpl<AppUserMapper, AppUser> imp
             // 初始化固定虚拟仓库点（每用户 1 个）与默认真实仓（每用户 1 个，tbl_user_storage，支持编辑收件地址/定位）
             userVirtualStationService.ensureUserVirtualStation(appUser.getId());
             userStorageService.ensureDefaultStorage(appUser.getId());
+            // F1 运营统计：注册成功（source: account/sms；一键登录走手机号直注，归入 sms）
+            statsEventService.fire("register", appUser.getId(),
+                    new com.alibaba.fastjson.JSONObject().fluentPut("source",
+                            loginVO.getType() != null && loginVO.getType() == 1 ? "account" : "sms"));
             return appUser;
         }
         return null;

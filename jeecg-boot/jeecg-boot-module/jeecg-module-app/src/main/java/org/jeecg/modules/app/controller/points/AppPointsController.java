@@ -26,6 +26,7 @@ import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.mapper.RechargeOrderMapper;
 import org.jeecg.modules.app.service.IPointsFlowService;
 import org.jeecg.modules.app.service.IUserAmountService;
+import org.jeecg.modules.app.service.StatsEventService;
 import org.jeecg.modules.app.utils.AppAuthUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,6 +53,9 @@ public class AppPointsController {
 
     @Autowired
     private RechargeOrderMapper rechargeOrderMapper;
+
+    @Autowired
+    private StatsEventService statsEventService;
 
     @Operation(summary = "查询积分账户")
     @GetMapping(value = "/account")
@@ -165,6 +169,12 @@ public class AppPointsController {
             log.error("mockPay addGoldCoin failed, orderNo={}, userId={}", order.getOrderNo(), loginUser.getId());
             return Result.error("积分入账失败，请联系客服");
         }
+
+        // F1 运营统计：支付成功（points 积分数、channel 支付渠道）
+        statsEventService.fire("payment_success", loginUser.getId(),
+                new com.alibaba.fastjson.JSONObject()
+                        .fluentPut("points", order.getPoints() == null ? 0 : order.getPoints())
+                        .fluentPut("channel", order.getChannel() == null ? "" : String.valueOf(order.getChannel())));
 
         log.info("mockPay success, orderNo={}, channel={}, points={}, balance={}",
                 order.getOrderNo(), order.getChannel(), order.getPoints(), balance);

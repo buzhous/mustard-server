@@ -1,5 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
+import org.jeecg.modules.app.service.StatsEventService;
+
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -28,6 +30,9 @@ public class UserCouponServiceImpl extends ServiceImpl<UserCouponMapper, UserCou
 
     @Autowired
     private ICouponService couponService;
+
+    @Autowired
+    private StatsEventService statsEventService;
 
     @Override
     public Page<UserCoupon> queryUserCouponPage(Page<UserCoupon> page, String userId, Integer status) {
@@ -98,6 +103,8 @@ public class UserCouponServiceImpl extends ServiceImpl<UserCouponMapper, UserCou
             coupon.setRemainCount(coupon.getRemainCount() - 1);
             coupon.setUpdateTime(DateUtil.date());
             couponService.updateById(coupon);
+            // F1 运营统计：拾取券领取成功
+            statsEventService.fire("coupon_claimed", userId, null);
         }
         return saved;
     }

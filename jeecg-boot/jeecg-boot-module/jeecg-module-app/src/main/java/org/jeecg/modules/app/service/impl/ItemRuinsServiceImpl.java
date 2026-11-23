@@ -1,5 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
+import org.jeecg.modules.app.service.StatsEventService;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -52,6 +54,9 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
 
     @Autowired
     LineageService lineageService;
+
+    @Autowired
+    StatsEventService statsEventService;
 
     @Override
     public IPage<ItemRuinsListVO> queryNotPickupRuinsPage(Integer page, Integer size, String userId) {
@@ -158,6 +163,9 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
                 .setOperator(LineageService.OPERATOR_USER)
                 .setQty(ruins.getQuantity())
                 .setIdempotencyKey("ruins_pick:" + ruins.getId()));
+
+        // F1 运营统计：殷墟拾取成功
+        statsEventService.fire("pickup_claimed", userId, null);
 
         // d) 标记券已使用
         userCouponService.useCoupon(userId, userCoupon.getId(), runsId);

@@ -35,9 +35,11 @@ public class AppAuthFilter implements Filter {
         String url = httpRequest.getRequestURL().toString();
 
         // 登陆跳过、开放平台接口跳过（开放接口独立 AK/SK 验签）、文章（协议需登录前可读）跳过、
-        // F1 运营统计上报跳过（匿名 app_launch，接口内自带白名单/限流/幂等）、非app项目跳过
+        // F1 运营统计上报跳过（匿名 app_launch，接口内自带白名单/限流/幂等）、
+        // F1 运营统计看板跳过（admin 后台 shiro token，部署侧内网隔离，与 mip 运维约定一致）、非app项目跳过
         if (url.contains("/app/login") || url.contains("/app/open/") || url.contains("/app/article")
                 || url.contains("/app/kuaidi/callback") || url.contains("/app/stats/track")
+                || url.contains("/app/stats/admin/")
                 || !url.contains("/app/")) {
             chain.doFilter(request, response);
             return;

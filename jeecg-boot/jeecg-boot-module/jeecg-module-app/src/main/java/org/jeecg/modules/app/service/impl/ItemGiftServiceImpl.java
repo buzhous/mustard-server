@@ -1,5 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
+import org.jeecg.modules.app.service.StatsEventService;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.core.date.DateUtil;
@@ -52,6 +54,9 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
     @Lazy
     @Autowired
     private IItemUserInventoryService itemUserInventoryService;
+
+    @Autowired
+    private StatsEventService statsEventService;
 
     @Lazy
     @Autowired
@@ -158,6 +163,10 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
                 .setOperator(operator)
                 .setQty(reqVO.getQuantity())
                 .setIdempotencyKey("gift_out:" + itemGift.getId()));
+
+        // F1 运营统计：赠送发出（withCode: 是否兑换码赠送）
+        statsEventService.fire("gift_sent", userId, new com.alibaba.fastjson.JSONObject()
+                .fluentPut("withCode", GiftTypeEnum.PUBLIC.getCode() == reqVO.getGiftType()));
 
         return BeanUtil.copyProperties(itemGift, ItemGiftRspVO.class);
     }

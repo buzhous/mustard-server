@@ -1,5 +1,7 @@
 package org.jeecg.modules.app.service.impl;
 
+import org.jeecg.modules.app.service.StatsEventService;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -42,12 +44,16 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
     public ItemInfoServiceImpl(IUserStationBindService userStationBindService,
                                IUserVirtualStationService userVirtualStationService,
                                IUserStorageService userStorageService,
-                               LineageService lineageService) {
+                               LineageService lineageService,
+                               StatsEventService statsEventService) {
         this.userStationBindService = userStationBindService;
         this.userVirtualStationService = userVirtualStationService;
         this.userStorageService = userStorageService;
         this.lineageService = lineageService;
+        this.statsEventService = statsEventService;
     }
+
+    private StatsEventService statsEventService;
 
     /**
      * 物品落仓：
@@ -156,6 +162,10 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
                     .setToUid(LineageService.hashUid(createVO.getUserId()))
                     .setOperator(operator)
                     .setIdempotencyKey("mint:" + item.getId()));
+            // F1 运营统计：首次建档（channel: ai/manual）
+            statsEventService.fire("first_item_created", createVO.getUserId(),
+                    new com.alibaba.fastjson.JSONObject().fluentPut("channel",
+                            "agent".equalsIgnoreCase(operator) ? "ai" : "manual"));
         }
         createVO.setItemId(String.valueOf(item.getId()));
         return result;

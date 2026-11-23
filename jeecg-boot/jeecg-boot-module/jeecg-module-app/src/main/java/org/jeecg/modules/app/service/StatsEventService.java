@@ -123,11 +123,11 @@ public class StatsEventService {
         return c.getTime();
     }
 
-    /** App 上报：按客户端时间戳归属自然日（服务端时区）；时钟偏差 >24h 以服务端时间修正 */
+    /** App 上报：按客户端时间戳归属自然日（服务端时区）；时钟偏差 >48h 以服务端时间修正（48h 容忍跨日测试与慢时钟设备） */
     private Date fromClientTs(Long clientTs) {
         long ts = clientTs == null ? System.currentTimeMillis() : clientTs;
         long now = System.currentTimeMillis();
-        if (Math.abs(now - ts) > 24L * 3600 * 1000) {
+        if (Math.abs(now - ts) > 48L * 3600 * 1000) {
             ts = now;
         }
         Calendar c = Calendar.getInstance();
