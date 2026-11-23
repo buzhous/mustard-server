@@ -41,6 +41,8 @@ public class AiChatMessage implements Serializable {
     public static final String TYPE_RECEIPT = "receipt";
     /** 消息类型：过程条目横条（process_entries 必填） */
     public static final String TYPE_PROCESS = "process";
+    /** 消息类型：查询结果卡（draft_snapshot 复用为查询结果 JSON，C2） */
+    public static final String TYPE_QUERY_RESULT = "query_result";
 
     @TableId(type = IdType.ASSIGN_ID)
     @Schema(description = "主键")
@@ -55,7 +57,7 @@ public class AiChatMessage implements Serializable {
     @Schema(description = "角色：user/assistant")
     private String role;
 
-    @Schema(description = "类型：text/draft/clarify/receipt/process")
+    @Schema(description = "类型：text/draft/clarify/receipt/process/query_result")
     private String msgType;
 
     @Schema(description = "文本内容")

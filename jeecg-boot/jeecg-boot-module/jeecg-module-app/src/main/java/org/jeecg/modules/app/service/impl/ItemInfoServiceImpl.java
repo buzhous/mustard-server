@@ -242,6 +242,20 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         if (queryVO.getStatus() != null) {
             wrapper.eq(ItemInfo::getStatus, queryVO.getStatus());
         }
+        if (ObjectUtil.isNotEmpty(queryVO.getCategory())) {
+            wrapper.eq(ItemInfo::getCategory, queryVO.getCategory().trim());
+        }
+        if (ObjectUtil.isNotEmpty(queryVO.getCategoryList())) {
+            // 多分类组查询（AI 泛称映射，如「证件」→ 身份证/护照/驾驶证/学历证书）
+            wrapper.in(ItemInfo::getCategory, queryVO.getCategoryList());
+        }
+        if (queryVO.getLevel() != null) {
+            wrapper.eq(ItemInfo::getLevel, queryVO.getLevel());
+        }
+        if (ObjectUtil.isNotEmpty(queryVO.getTag())) {
+            // 标签随 fields JSON（element 10 标签组）落库，走模糊匹配
+            wrapper.like(ItemInfo::getFields, queryVO.getTag().trim());
+        }
         // 排序字段白名单，防注入
         Map<String, SFunction<ItemInfo, ?>> sortColumns = Map.of(
                 "created", ItemInfo::getCreateTime,

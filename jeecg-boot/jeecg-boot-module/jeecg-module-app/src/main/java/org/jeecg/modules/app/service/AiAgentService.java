@@ -58,6 +58,8 @@ public class AiAgentService {
     private final AppOpenService appOpenService;
     private final AiModelAdapter modelAdapter;
     private final AiRateLimiter rateLimiter;
+    /** C2 对话式查询编排器（意图分流后委托） */
+    private final AiQueryService queryService;
 
     private volatile String promptTemplate;
 
@@ -67,7 +69,8 @@ public class AiAgentService {
                           IUserCategoryService userCategoryService,
                           AppOpenService appOpenService,
                           AiModelAdapter modelAdapter,
-                          AiRateLimiter rateLimiter) {
+                          AiRateLimiter rateLimiter,
+                          AiQueryService queryService) {
         this.sessionService = sessionService;
         this.messageService = messageService;
         this.credentialService = credentialService;
@@ -75,6 +78,7 @@ public class AiAgentService {
         this.appOpenService = appOpenService;
         this.modelAdapter = modelAdapter;
         this.rateLimiter = rateLimiter;
+        this.queryService = queryService;
     }
 
     // ================================ S3/S4 · 发送与解析 ================================
@@ -85,6 +89,10 @@ public class AiAgentService {
     public AiChatSendVO send(String uid, String sessionId, String text, List<String> images) {
         if (StrUtil.isBlank(text) && (images == null || images.isEmpty())) {
             throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
+        }
+        // C2 意图分流：查询语型走对话式查询管线（复用同会话/限流/消息表），其余保持建档管线
+        if (AiQueryService.isQueryText(text, images)) {
+            return queryService.send(uid, sessionId, text, images);
         }
         AiChatSession session = sessionService.getOwned(uid, sessionId);
         if (session == null) {
