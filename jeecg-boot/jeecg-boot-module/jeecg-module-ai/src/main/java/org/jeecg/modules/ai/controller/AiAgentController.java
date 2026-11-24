@@ -49,7 +49,7 @@ public class AiAgentController {
         }
         List<String> images = body.getJSONArray("images") == null
                 ? null : body.getJSONArray("images").toJavaList(String.class);
-        // mode 可选：normal（默认对话建档）| express（快速建档，免确认直达）
+        // mode 可选：normal（默认对话建档）| express（快速建档，免确认直达）| mock（模拟建档，虚构补齐草稿）
         return Result.OK(agentService.send(uid, body.getString("sessionId"),
                 body.getString("text"), images, body.getString("mode")));
     }

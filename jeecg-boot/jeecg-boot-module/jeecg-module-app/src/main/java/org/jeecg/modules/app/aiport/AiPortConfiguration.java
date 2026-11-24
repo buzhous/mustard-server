@@ -7,6 +7,7 @@ import org.jeecg.modules.ai.port.TaxonomyPort;
 import org.jeecg.modules.app.service.AppOpenService;
 import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IItemSyncService;
+import org.jeecg.modules.app.service.ISystemCategoryService;
 import org.jeecg.modules.app.service.IUserCategoryService;
 import org.jeecg.modules.app.service.IUserTagService;
 import org.jeecg.modules.app.service.IUserVirtualStationService;
@@ -30,6 +31,7 @@ public class AiPortConfiguration {
     private final IUserCategoryService userCategoryService;
     private final IUserTagService userTagService;
     private final ITopicService topicService;
+    private final ISystemCategoryService systemCategoryService;
     private final IUserVirtualStationService virtualStationService;
     private final IUserStationBindService stationBindService;
     private final IWarehouseStationService warehouseStationService;
@@ -41,6 +43,7 @@ public class AiPortConfiguration {
                                IUserCategoryService userCategoryService,
                                IUserTagService userTagService,
                                ITopicService topicService,
+                               ISystemCategoryService systemCategoryService,
                                IUserVirtualStationService virtualStationService,
                                IUserStationBindService stationBindService,
                                IWarehouseStationService warehouseStationService) {
@@ -51,6 +54,7 @@ public class AiPortConfiguration {
         this.userCategoryService = userCategoryService;
         this.userTagService = userTagService;
         this.topicService = topicService;
+        this.systemCategoryService = systemCategoryService;
         this.virtualStationService = virtualStationService;
         this.stationBindService = stationBindService;
         this.warehouseStationService = warehouseStationService;
@@ -63,7 +67,7 @@ public class AiPortConfiguration {
 
     @Bean
     public TaxonomyPort aiTaxonomyPort() {
-        return new AiTaxonomyPortImpl(userCategoryService, userTagService, topicService,
+        return new AiTaxonomyPortImpl(userCategoryService, userTagService, topicService, systemCategoryService,
                 virtualStationService, stationBindService, warehouseStationService);
     }
 

@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * AI 建档编排器 v2（方案 4.1 skill v2 契约 / 4.2 express / 4.3 自动分类标签）
@@ -59,6 +60,8 @@ public class AiAgentService {
     public static final String MODE_NORMAL = "normal";
     /** 模式：express 快速建档（一轮直达，免确认自动创建） */
     public static final String MODE_EXPRESS = "express";
+    /** 模式：mock 模拟建档（虚构补齐完整草稿，免追问，不走免确认创建） */
+    public static final String MODE_MOCK = "mock";
 
     private final AiChatSessionServiceImpl sessionService;
     private final AiChatMessageServiceImpl messageService;
@@ -98,15 +101,17 @@ public class AiAgentService {
      * 聊天发送：意图路由（正则快路径 + intent 兜底）→ 解析管线（vision 降级口述 / 通用 fields /
      * 置信度）→ 追问槽位 → 草稿快照；express 模式免确认自动创建。
      *
-     * @param mode normal（默认，对话建档）| express（快速建档）
+     * @param mode normal（默认，对话建档）| express（快速建档）| mock（模拟建档）
      */
     public AiChatSendVO send(String uid, String sessionId, String text, List<String> images, String mode) {
         if (StrUtil.isBlank(text) && (images == null || images.isEmpty())) {
             throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
         }
         boolean express = MODE_EXPRESS.equals(mode);
+        // mock 模拟建档：显式 mode=mock 或自然语言模拟话术（express 显式模式优先；模拟话术不转查询管线）
+        boolean mock = MODE_MOCK.equals(mode) || (!express && AiIntentRouter.isMockText(text));
         // C2 意图快路径：查询语型走对话式查询管线（复用同会话/限流/消息表）
-        if (AiIntentRouter.routeToQuery(text, images, null, express)) {
+        if (!mock && AiIntentRouter.routeToQuery(text, images, null, express)) {
             return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images);
         }
         AiChatSession session = sessionService.getOwned(uid, sessionId);
@@ -118,9 +123,9 @@ public class AiAgentService {
         // 解析管线（先于消息落库：intent 兜底路由命中查询时，由查询管线自行落库，避免消息重复）
         String visionDesc = resolveVision(imgs, text);
         String userText = StrUtil.blankToDefault(text, "（仅图片，无文字）");
-        List<AiCategoryRef> categories = taxonomyPort.listCategories(uid);
+        List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
         String draftState = StrUtil.blankToDefault(session.getDraftSnapshot(), "null");
-        int askBudget = express ? 0 : Math.max(0, MAX_ASKS - nz(session.getAskCount()));
+        int askBudget = (express || mock) ? 0 : Math.max(0, MAX_ASKS - nz(session.getAskCount()));
         String history = recentHistory(uid, sessionId);
         String topicsJson = JSON.toJSONString(taxonomyPort.listTopics());
         String systemPrompt = prompt()
@@ -129,7 +134,7 @@ public class AiAgentService {
                 .replace("{{ASK_BUDGET}}", String.valueOf(askBudget))
                 .replace("{{USER_CATEGORIES}}", JSON.toJSONString(categories))
                 .replace("{{USER_TOPICS}}", topicsJson)
-                .replace("{{MODE}}", express ? MODE_EXPRESS : MODE_NORMAL)
+                .replace("{{MODE}}", express ? MODE_EXPRESS : mock ? MODE_MOCK : MODE_NORMAL)
                 .replace("{{DRAFT_STATE}}", draftState)
                 .replace("{{USER_TEXT}}", userText);
 
@@ -139,8 +144,9 @@ public class AiAgentService {
         JSONObject modelDraft = decision.getJSONObject("draft");
         JSONObject clarify = decision.getJSONObject("clarify");
 
-        // intent 兜底路由：正则未命中但模型判定为查询（仅纯文本；同轮解析结果丢弃，查询管线独立解析）
-        if (AiIntentRouter.routeToQuery(text, imgs, decision.getString("intent"), express)) {
+        // intent 兜底路由：正则未命中但模型判定为查询（仅纯文本；同轮解析结果丢弃，查询管线独立解析；
+        // mock 模拟建档跳过，防模型误判 query 抢走模拟建档）
+        if (!mock && AiIntentRouter.routeToQuery(text, imgs, decision.getString("intent"), express)) {
             return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images);
         }
 
@@ -167,7 +173,7 @@ public class AiAgentService {
             chipBox.put("chips", chips);
             chipBox.put("slot", StrUtil.blankToDefault(clarify.getString("slot"), ""));
             JSONObject clarifyDraft = modelDraft == null ? null
-                    : normalizeDraft(modelDraft, categories, imgs);
+                    : normalizeDraft(modelDraft, categories, imgs, userText);
             assistantMsgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                     AiChatMessage.TYPE_CLARIFY, question, null,
                     chipBox.toJSONString(),
@@ -187,11 +193,13 @@ public class AiAgentService {
 
         // draft / chat（追问预算耗尽时模型返回 clarify 也降级为 draft/chat）
         if (modelDraft != null && !"chat".equals(action)) {
-            JSONObject draft = normalizeDraft(modelDraft, categories, imgs);
+            JSONObject draft = normalizeDraft(modelDraft, categories, imgs, userText);
             int overall = overallOf(draft);
 
-            // express 直接建档：direct=true 且 overall≥85 → 免确认创建；失败/低置信落草稿降级
-            if (express && Boolean.TRUE.equals(draft.getBoolean("direct")) && overall >= CONFIDENCE_GATE) {
+            // express 直接建档：direct=true 且 overall≥85 → 免确认创建；失败/低置信落草稿降级。
+            // manualFill 非空（restricted 拦截/敏感兜底命中）→ 不自动创建，降级草稿让用户补录后确认
+            if (express && Boolean.TRUE.equals(draft.getBoolean("direct")) && overall >= CONFIDENCE_GATE
+                    && draft.getJSONArray("manualFill") == null) {
                 return expressCreate(uid, sessionId, session, userMsg, draft, overall, assistantMsgs, vo);
             }
 
@@ -312,8 +320,8 @@ public class AiAgentService {
             try {
                 JSONObject edited = JSON.parseObject(draftJson);
                 if (edited != null) {
-                    List<AiCategoryRef> categories = taxonomyPort.listCategories(uid);
-                    draft = normalizeDraft(edited, categories, List.of());
+                    List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
+                    draft = normalizeDraft(edited, categories, List.of(), null);
                     session.setDraftSnapshot(draft.toJSONString());
                 }
             } catch (Exception e) {
@@ -489,12 +497,15 @@ public class AiAgentService {
     /**
      * 草稿规范化 v2：顶层槽位沿用 v1（类别名 → id 映射、tags ≤3 截断），
      * fields[] 通用组件白名单校验（restricted → manualFill 手动补录提示），
-     * proposed/manualFill 透传进快照。
+     * proposed/manualFill 透传进快照；userText 敏感词兜底（红线第三重防线）。
      */
-    private JSONObject normalizeDraft(JSONObject modelDraft, List<AiCategoryRef> categories, List<String> imgs) {
+    private JSONObject normalizeDraft(JSONObject modelDraft, List<AiCategoryRef> categories, List<String> imgs,
+                                      String userText) {
         JSONObject draft = mergeDraft(null, modelDraft, categories);
         // fields[] 白名单校验（v2 通用组件槽）
         sanitizeFields(draft);
+        // 用户口述敏感信息但模型未给 manualFill（如 express 省略）→ 注入手动补录提示
+        ensureSensitiveHint(draft, userText);
         // 附图 → icon/图片组件兜底值（vision 元数据）
         if (!imgs.isEmpty()) {
             JSONObject icon = draft.getJSONObject("icon");
@@ -505,6 +516,24 @@ public class AiAgentService {
             ensureImagesField(draft, imgs);
         }
         return draft;
+    }
+
+    /** 用户原文敏感词模式（restricted 类元素语义：证件号/有效期/密码/兑换码/账号/凭证等） */
+    private static final Pattern SENSITIVE_HINT_PATTERN = Pattern.compile(
+            "证件|身份证|护照|驾驶证|行驶证|密码|兑换码|卡密|卡号|账号标识|购买凭证|有效期");
+
+    /**
+     * 敏感信息兜底（红线第三重防线）：用户原文命中敏感词但草稿无 manualFill 时注入提示。
+     * sanitizeFields 只能拦截「模型输出了 restricted field」的场景；模型整体遗漏时由此兜底。
+     */
+    private void ensureSensitiveHint(JSONObject draft, String userText) {
+        if (draft.containsKey("manualFill") || StrUtil.isBlank(userText)
+                || !SENSITIVE_HINT_PATTERN.matcher(userText).find()) {
+            return;
+        }
+        JSONArray hint = new JSONArray();
+        hint.add("证件号等敏感信息请手动补录");
+        draft.put("manualFill", hint);
     }
 
     /**
@@ -704,6 +733,10 @@ public class AiAgentService {
             }
             if (patch.getBoolean("direct") != null) {
                 draft.put("direct", patch.getBoolean("direct"));
+            }
+            // mock 模拟草稿标志透传（App/E2E 识别模拟草稿用）
+            if (patch.getBoolean("mock") != null) {
+                draft.put("mock", patch.getBoolean("mock"));
             }
         }
         // 类别解析（必做）：模型给名称或回显历史快照中的 id 都要正确归一

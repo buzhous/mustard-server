@@ -1,0 +1,3 @@
+-- 物品分类体系升级（C3 分类治理）
+-- 本文件为 V3.9.7_1__mustard_system_category.sql 的存档副本（flyway 自动执行，无需手工跑）
+-- 内容见：jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/V3.9.7_1__mustard_system_category.sql

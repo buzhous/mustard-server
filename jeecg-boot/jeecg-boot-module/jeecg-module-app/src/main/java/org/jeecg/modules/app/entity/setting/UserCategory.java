@@ -59,4 +59,8 @@ public class UserCategory implements Serializable {
     @Excel(name = "系统分类", width = 15)
     @Schema(description = "系统分类")
     private java.lang.Integer isSys;
+
+    @Excel(name = "系统分类id", width = 15)
+    @Schema(description = "系统分类id（实例化来源，手动创建为空）")
+    private java.lang.String systemId;
 }

@@ -90,6 +90,9 @@ public enum ExceptionEnum {
     DATA_UPDATE_ERROR(11000, "更新失败"),
     DATA_DELETE_ERROR(11001, "删除失败"),
     REQUEST_PARAM_ERROR(11002, "请求参数错误"),
+
+    /** C3 分类治理：编辑/创建分类名称与启用系统分类重名（编辑场景） */
+    CATEGORY_NAME_CONFLICT(10114, "分类名称与系统分类重名，请更换名称"),
     LOCK_FAILED(11003, "锁获取失败"),
     ;
 

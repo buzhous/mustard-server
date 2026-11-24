@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * R1/R3 受控物品工具：草稿 → 写内核 attributes 组装 + 单条记录承载件数创建 + 读包装。
@@ -34,6 +35,8 @@ public class ItemTools {
     private static final int MAX_ATTR_ITEMS = 40;
     /** 数量上限 */
     private static final int MAX_QTY = 99;
+    /** iconpark 官方图标名形态（小写字母/数字开头，含连字符/下划线，2–48 位），如 camera / electron_dev */
+    private static final Pattern ICON_KEY_PATTERN = Pattern.compile("^[a-z0-9][a-z0-9_-]{1,47}$");
     /** AI 专属凭据标记（开放接口 source） */
     private static final String AI_SOURCE = "ai-assistant";
 
@@ -56,10 +59,13 @@ public class ItemTools {
         JSONArray attributes = new JSONArray();
         attributes.add(attr(1, str(draft, "name")));
         JSONObject icon = draft.getJSONObject("icon");
-        String iconUrl = icon == null ? null : StrUtil.trimToNull(icon.getString("value"));
-        // 图标缺失或非法 URL 时不填充占位域名，App 端按空图标走本地占位展示
-        if (iconUrl != null && (iconUrl.startsWith("http://") || iconUrl.startsWith("https://"))) {
-            attributes.add(attr(2, iconUrl));
+        String iconValue = icon == null ? null : StrUtil.trimToNull(icon.getString("value"));
+        // URL → 封面图；合法 iconpark 图标名（mock 模拟建档提名）→ 原样落库，App 端按图标名渲染、
+        // 识别失败自动回退本地占位；其余非法值不填充占位域名
+        if (iconValue != null && (iconValue.startsWith("http://") || iconValue.startsWith("https://"))) {
+            attributes.add(attr(2, iconValue));
+        } else if (iconValue != null && ICON_KEY_PATTERN.matcher(iconValue).matches()) {
+            attributes.add(attr(2, iconValue));
         }
         attributes.add(attr(3, str(draft, "category")));
         String desc = str(draft, "description");

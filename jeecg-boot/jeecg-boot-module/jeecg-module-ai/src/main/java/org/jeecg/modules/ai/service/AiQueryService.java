@@ -141,7 +141,7 @@ public class AiQueryService {
         AiChatMessage userMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_USER,
                 AiChatMessage.TYPE_TEXT, text, imgs, null, null, null);
 
-        List<AiCategoryRef> categories = taxonomyPort.listCategories(uid);
+        List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
         // 用户仓位清单（虚拟仓 + 绑定真实站点仓）：station 参数解析为 stationIds 组查询
         List<AiStationRef> stations = taxonomyPort.listStations(uid);
 
@@ -245,7 +245,7 @@ public class AiQueryService {
         if (params != null) {
             query.setKeyword(clipStr(params.getString("keyword"), MAX_KEYWORD));
             // 组查询优先：categories 数组（泛称映射多分类，如「证件」→[身份证,护照,驾驶证]）
-            Set<String> categoryValues = resolveCategoryValues(params, categories, usedCategoryValues);
+            Set<String> categoryValues = resolveCategoryValues(uid, params, categories, usedCategoryValues);
             if (!categoryValues.isEmpty()) {
                 query.setCategoryList(new ArrayList<>(categoryValues));
             } else if (query.getKeyword() == null && StrUtil.isNotBlank(params.getString("category"))) {
@@ -454,7 +454,7 @@ public class AiQueryService {
             // 名称唯一命中才出详情卡（0/多件回退 search 卡）；category 消歧：命中分类值后重新限定查询
             AiItemQuery q = new AiItemQuery().setUserId(uid).setKeyword(itemName).setPageNo(1).setPageSize(2);
             Set<String> hint = new LinkedHashSet<>();
-            collectCategoryValues(categoryHint, categories, distinctItemCategories(uid), hint);
+            collectCategoryValues(uid, categoryHint, categories, distinctItemCategories(uid), hint);
             if (!hint.isEmpty()) {
                 q.setCategoryList(new ArrayList<>(hint));
             }
@@ -653,35 +653,46 @@ public class AiQueryService {
     }
 
     /** 组查询：categories 分类名数组（≤10 个）+ 单数 category 兜底，解析为物品分类值集合（id/名字混合存储，均需匹配） */
-    private Set<String> resolveCategoryValues(JSONObject params, List<AiCategoryRef> categories,
+    private Set<String> resolveCategoryValues(String uid, JSONObject params, List<AiCategoryRef> categories,
                                               Set<String> usedCategoryValues) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
         JSONArray arr = params == null ? null : params.getJSONArray("categories");
         if (arr != null && !arr.isEmpty()) {
             for (int i = 0; i < arr.size() && out.size() < 10; i++) {
-                collectCategoryValues(arr.getString(i), categories, usedCategoryValues, out);
+                collectCategoryValues(uid, arr.getString(i), categories, usedCategoryValues, out);
             }
         }
         if (out.isEmpty()) {
-            collectCategoryValues(params == null ? null : params.getString("category"),
+            collectCategoryValues(uid, params == null ? null : params.getString("category"),
                     categories, usedCategoryValues, out);
         }
         return out;
     }
 
-    /** 单个分类名 → 物品分类值：用户分类命中时 id/名称都收（历史数据两种都存），否则对物品在用值做精确/包含匹配 */
-    private void collectCategoryValues(String raw, List<AiCategoryRef> categories,
+    /**
+     * 单个分类名 → 物品分类值（三级）：
+     * ① 用户分类命中时 id/名称都收（历史数据两种都存）；
+     * ② 系统分类命中（id/名称，统一清单）→ 聚合该系统分类下该用户已实例化的用户分类值；
+     * ③ 最后对物品在用值做精确/包含匹配（兼容历史清单外分类）
+     */
+    private void collectCategoryValues(String uid, String raw, List<AiCategoryRef> categories,
                                        Set<String> usedCategoryValues, Set<String> out) {
         String name = StrUtil.trimToNull(raw);
         if (name == null || out.size() >= 10) {
             return;
         }
         for (AiCategoryRef c : categories) {
-            if (name.equals(String.valueOf(c.getId())) || name.equalsIgnoreCase(c.getName())) {
+            if (c.isUser() && (name.equals(String.valueOf(c.getId())) || name.equalsIgnoreCase(c.getName()))) {
                 out.add(String.valueOf(c.getId()));
                 if (c.getName() != null) {
                     out.add(c.getName());
                 }
+                return;
+            }
+        }
+        for (AiCategoryRef s : categories) {
+            if (!s.isUser() && (name.equals(String.valueOf(s.getId())) || name.equalsIgnoreCase(s.getName()))) {
+                out.addAll(taxonomyPort.categoryIdsBySystemName(uid, s.getName()));
                 return;
             }
         }

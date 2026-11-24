@@ -11,6 +11,7 @@ import org.jeecg.modules.ai.bean.dto.AiStationRef;
 import org.jeecg.modules.ai.bean.dto.AiTagRef;
 import org.jeecg.modules.ai.bean.dto.AiTopicRef;
 import org.jeecg.modules.ai.port.TaxonomyPort;
+import org.jeecg.modules.app.entity.SystemCategory;
 import org.jeecg.modules.app.entity.Topic;
 import org.jeecg.modules.app.entity.setting.UserCategory;
 import org.jeecg.modules.app.entity.setting.UserTag;
@@ -18,6 +19,7 @@ import org.jeecg.modules.app.entity.warehouse.UserStationBind;
 import org.jeecg.modules.app.entity.warehouse.UserVirtualStation;
 import org.jeecg.modules.app.entity.warehouse.WarehouseStation;
 import org.jeecg.modules.app.service.IWarehouseStationService;
+import org.jeecg.modules.app.service.ISystemCategoryService;
 import org.jeecg.modules.app.service.IUserCategoryService;
 import org.jeecg.modules.app.service.IUserStationBindService;
 import org.jeecg.modules.app.service.IUserTagService;
@@ -25,7 +27,9 @@ import org.jeecg.modules.app.service.IUserVirtualStationService;
 import org.jeecg.modules.app.service.ITopicService;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * TaxonomyPort 桥接实现：
@@ -41,6 +45,8 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
     private static final int TOPIC_STATUS_ENABLED = 0;
     /** 提示词注入主题数上限（防上下文膨胀） */
     private static final int MAX_TOPICS = 60;
+    /** 统一分类清单中系统分类注入上限（防上下文膨胀） */
+    private static final int MAX_SYSTEM_CATEGORIES = 40;
     /** 绑定状态：1已绑定 */
     private static final int BIND_STATUS_BOUND = 1;
     /** 仓位类型 */
@@ -50,6 +56,7 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
     private final IUserCategoryService userCategoryService;
     private final IUserTagService userTagService;
     private final ITopicService topicService;
+    private final ISystemCategoryService systemCategoryService;
     private final IUserVirtualStationService virtualStationService;
     private final IUserStationBindService stationBindService;
     private final IWarehouseStationService warehouseStationService;
@@ -57,12 +64,14 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
     public AiTaxonomyPortImpl(IUserCategoryService userCategoryService,
                               IUserTagService userTagService,
                               ITopicService topicService,
+                              ISystemCategoryService systemCategoryService,
                               IUserVirtualStationService virtualStationService,
                               IUserStationBindService stationBindService,
                               IWarehouseStationService warehouseStationService) {
         this.userCategoryService = userCategoryService;
         this.userTagService = userTagService;
         this.topicService = topicService;
+        this.systemCategoryService = systemCategoryService;
         this.virtualStationService = virtualStationService;
         this.stationBindService = stationBindService;
         this.warehouseStationService = warehouseStationService;
@@ -74,19 +83,59 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
                 .eq(UserCategory::getUserId, uid));
         List<AiCategoryRef> refs = new ArrayList<>(categories.size());
         for (UserCategory c : categories) {
-            refs.add(new AiCategoryRef().setId(c.getId()).setName(c.getName()));
+            refs.add(new AiCategoryRef()
+                    .setId(c.getId())
+                    .setName(c.getName())
+                    .setUser(true)
+                    .setUserCategoryId(c.getId()));
         }
         return refs;
     }
 
     @Override
-    public AiCategoryRef createCategory(String uid, String name, String icon) {
+    public List<AiCategoryRef> listUnifiedCategories(String uid) {
+        List<AiCategoryRef> refs = new ArrayList<>(listCategories(uid));
+        // 启用系统分类（sort 升序，限流防上下文膨胀）；已被该用户实例化的系统分类带 userCategoryId
+        List<SystemCategory> systemCategories = systemCategoryService.list(new LambdaQueryWrapper<SystemCategory>()
+                .eq(SystemCategory::getStatus, 1)
+                .orderByAsc(SystemCategory::getSort)
+                .last("limit " + MAX_SYSTEM_CATEGORIES));
+        if (systemCategories.isEmpty()) {
+            return refs;
+        }
+        // 该用户已实例化的映射：system_id → 用户分类 id
+        Map<String, String> instantiated = new HashMap<>();
+        for (UserCategory c : userCategoryService.list(new LambdaQueryWrapper<UserCategory>()
+                .eq(UserCategory::getUserId, uid)
+                .isNotNull(UserCategory::getSystemId))) {
+            if (StrUtil.isNotBlank(c.getSystemId())) {
+                instantiated.putIfAbsent(c.getSystemId(), c.getId());
+            }
+        }
+        for (SystemCategory s : systemCategories) {
+            refs.add(new AiCategoryRef()
+                    .setId(s.getId())
+                    .setName(s.getName())
+                    .setUser(false)
+                    .setUserCategoryId(instantiated.get(s.getId())));
+        }
+        return refs;
+    }
+
+    @Override
+    public AiCategoryRef createCategory(String uid, String name, String icon, String systemId) {
         UserCategory category = new UserCategory()
                 .setUserId(uid)
                 .setName(name)
-                .setIcon(StrUtil.blankToDefault(icon, "box"));
+                .setIcon(StrUtil.blankToDefault(icon, "box"))
+                .setIsSys(StrUtil.isNotBlank(systemId) ? 1 : 0)
+                .setSystemId(StrUtil.isNotBlank(systemId) ? systemId : null);
         userCategoryService.save(category);
-        return new AiCategoryRef().setId(category.getId()).setName(category.getName());
+        return new AiCategoryRef()
+                .setId(category.getId())
+                .setName(category.getName())
+                .setUser(true)
+                .setUserCategoryId(category.getId());
     }
 
     @Override
@@ -157,6 +206,34 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
             }
         }
         return refs;
+    }
+
+    @Override
+    public List<String> categoryIdsBySystemName(String uid, String systemName) {
+        String name = StrUtil.trimToNull(systemName);
+        if (name == null) {
+            return List.of();
+        }
+        // 系统分类精确匹配（模型提名来自统一清单，名称精确）；无实例化行返回空
+        SystemCategory sys = systemCategoryService.getOne(new LambdaQueryWrapper<SystemCategory>()
+                .eq(SystemCategory::getName, name)
+                .eq(SystemCategory::getStatus, 1)
+                .last("limit 1"), false);
+        if (sys == null) {
+            return List.of();
+        }
+        List<UserCategory> rows = userCategoryService.list(new LambdaQueryWrapper<UserCategory>()
+                .eq(UserCategory::getUserId, uid)
+                .eq(UserCategory::getSystemId, sys.getId()));
+        // 物品 category 历史数据 id/名称两种都存，与 collectCategoryValues 口径一致
+        List<String> out = new ArrayList<>(rows.size() * 2);
+        for (UserCategory c : rows) {
+            out.add(c.getId());
+            if (StrUtil.isNotBlank(c.getName())) {
+                out.add(c.getName());
+            }
+        }
+        return out;
     }
 
     /** 主题 fields JSON → 组件编号集（[{"element":1,...}]；仅保留已知编号，解析失败返回空列表） */

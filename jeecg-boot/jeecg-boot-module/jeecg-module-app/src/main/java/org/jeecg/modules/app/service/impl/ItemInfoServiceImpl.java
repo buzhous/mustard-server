@@ -233,7 +233,9 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         // 回收站/已销毁物品不参与检索：移入回收站（全量删除）后同步记录置 DESTROYED(3)，
         // 彻底删除后 DESTROYED 同步记录被物理清除——故仅当存在未销毁的同步记录时物品仍在库；
         // 部分删除只扣数量、同步记录保留，物品正常可见（ItemSync.itemId = ItemInfo.id 字符串）
-        wrapper.exists("select 1 from tbl_item_sync s where s.item_id = cast(tbl_item_info.id as char)"
+        // cast 产物携带连接默认 collation（utf8mb4_0900_ai_ci），与 general_ci 列比较报 1267，
+        // 显式对齐 utf8mb4_general_ci（tbl_item_sync.item_id / tbl_item_info.user_id 均为该 collation）
+        wrapper.exists("select 1 from tbl_item_sync s where s.item_id = cast(tbl_item_info.id as char) collate utf8mb4_general_ci"
                 + " and s.user_id = tbl_item_info.user_id and (s.status is null or s.status <> "
                 + SyncStatusEnum.DESTROYED.getCode() + ")");
         if (ObjectUtil.isNotEmpty(queryVO.getKeyword())) {

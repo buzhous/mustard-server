@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import org.jeecg.modules.ai.bean.vo.ai.AiChatSendVO;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * 意图路由（方案 4.4）：正则 STRONG/WEAK_QUERY 保留为快路径；
@@ -38,6 +39,28 @@ public final class AiIntentRouter {
         // 模型兜底：仅纯文本 + 显式 query 意图
         return (images == null || images.isEmpty())
                 && INTENT_QUERY.equals(StrUtil.trimToNull(decisionIntent));
+    }
+
+    /** mock 快路径条件一：模拟/虚构类话术词 */
+    private static final Pattern MOCK_HINT = Pattern.compile("模拟|虚构|假装|试想|帮我编|编个|编一个|虚拟");
+    /** mock 快路径条件二：建档语义锚点（与条件一同时命中才判 mock） */
+    private static final Pattern MOCK_ANCHOR = Pattern.compile("建档|档案|物品|收录|帮我记|一个|一下|买了|买过|入手");
+    /** mock 排除词：模拟器/模拟考/模拟经营等非建档语境 */
+    private static final Pattern MOCK_EXCLUDE = Pattern.compile("模拟(器|考|经营|量|测试|数据|环境|盘|信号|退火|点击)");
+
+    /**
+     * 本轮是否为模拟建档话术（正则快路径）：模拟/虚构类词与建档语义锚点同时命中，且未命中排除词
+     * （模拟器/模拟考等）。命中后编排器按 mock 契约出稿；未命中时模型可经 prompt 内联 mock 语义兜底。
+     */
+    public static boolean isMockText(String text) {
+        if (StrUtil.isBlank(text)) {
+            return false;
+        }
+        String s = text.trim();
+        if (MOCK_EXCLUDE.matcher(s).find()) {
+            return false;
+        }
+        return MOCK_HINT.matcher(s).find() && MOCK_ANCHOR.matcher(s).find();
     }
 
     /**

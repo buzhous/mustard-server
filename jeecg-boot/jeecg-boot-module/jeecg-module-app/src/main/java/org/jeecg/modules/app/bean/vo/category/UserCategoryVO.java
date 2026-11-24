@@ -36,4 +36,7 @@ public class UserCategoryVO implements Serializable {
     @Schema(description = "系统分类")
     private Integer isSys;
 
+    @Schema(description = "系统分类id（实例化来源，手动创建为空）")
+    private String systemId;
+
 }
