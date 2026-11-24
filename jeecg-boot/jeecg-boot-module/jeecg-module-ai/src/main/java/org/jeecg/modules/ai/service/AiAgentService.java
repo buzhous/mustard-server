@@ -265,9 +265,9 @@ public class AiAgentService {
                     .setDirect(false);
         }
 
-        String receipt = "已创建（×" + outcome.oriIds().size() + "）";
+        String receipt = "已创建（×" + outcome.quantity() + "）";
         JSONObject receiptBox = new JSONObject(true);
-        receiptBox.put("count", outcome.oriIds().size());
+        receiptBox.put("count", outcome.quantity());
         receiptBox.put("itemIds", outcome.oriIds());
         receiptBox.put("express", true);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
@@ -285,7 +285,8 @@ public class AiAgentService {
                 .setMessages(join(userMsg, msgs))
                 .setDraft(null)
                 .setDirect(true)
-                .setItemIds(outcome.oriIds());
+                .setItemIds(outcome.oriIds())
+                .setQuantity(outcome.quantity());
     }
 
     // ================================ S5 · 创建调度 ================================
@@ -331,25 +332,25 @@ public class AiAgentService {
         List<String> oriIds = outcome.oriIds();
         String firstError = outcome.firstError();
 
-        // 过程条目 + 回执（×N 标注）
+        // 过程条目 + 回执（×N 标注；total/ok/fail 为记录口径，件数由回执 ×N 表达）
         List<AiChatMessage> msgs = new ArrayList<>();
         JSONObject process = new JSONObject(true);
         process.put("step", "create");
-        process.put("total", n);
+        process.put("total", outcome.total());
         process.put("ok", oriIds.size());
-        process.put("fail", n - oriIds.size());
+        process.put("fail", outcome.total() - oriIds.size());
         process.put("itemIds", oriIds);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                 AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null));
         AiChatCreateVO vo = new AiChatCreateVO().setSessionId(sessionId)
-                .setTotal(n).setCount(oriIds.size()).setItemIds(oriIds);
+                .setTotal(n).setCount(oriIds.isEmpty() ? 0 : n).setItemIds(oriIds);
         if (oriIds.isEmpty()) {
             vo.setError(StrUtil.blankToDefault(firstError, "创建失败"));
             session.setLastSummary("创建失败");
         } else {
-            String receipt = "已创建（×" + oriIds.size() + "）";
+            String receipt = "已创建（×" + n + "）";
             JSONObject receiptBox = new JSONObject(true);
-            receiptBox.put("count", oriIds.size());
+            receiptBox.put("count", n);
             receiptBox.put("itemIds", oriIds);
             msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                     AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null));

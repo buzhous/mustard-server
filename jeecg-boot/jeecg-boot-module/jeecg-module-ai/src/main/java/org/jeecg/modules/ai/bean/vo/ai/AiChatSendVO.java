@@ -43,4 +43,7 @@ public class AiChatSendVO implements Serializable {
 
     @Schema(description = "express 直接建档成功的物品 oriId 清单（×N）")
     private List<String> itemIds;
+
+    @Schema(description = "express 直接建档件数（数量 ×N，direct=true 时可用）")
+    private Integer quantity;
 }

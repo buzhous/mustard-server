@@ -17,7 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * R1/R3 受控物品工具：草稿 → 写内核 attributes 组装 + N 件创建循环 + 读包装。
+ * R1/R3 受控物品工具：草稿 → 写内核 attributes 组装 + 单条记录承载件数创建 + 读包装。
  * <p>
  * normal confirmCreate 与 express 自动创建共用同一创建链路（凭据解析/幂等键在端口实现内）；
  * 白名单校验（restricted/未知 element 丢弃）在组装层强制执行，MIP 出域过滤为第三重防线。
@@ -124,36 +124,38 @@ public class ItemTools {
     }
 
     /**
-     * 创建 N 件（N 件 = N 个 oriId，相同字段信息；数量截断 1–99）。
+     * 创建 1 条物品记录，件数为 quantity（数量组件 element 7 顶层直传，服务端 addItem 提取为
+     * ItemInfo.quantity 与库存数量；范围 1–99）。同规格多件不再拆分为多条记录。
      *
-     * @return CreateOutcome（oriIds 成功清单 + firstError 首个失败原因）
+     * @return CreateOutcome（oriIds 成功清单 + firstError 首个失败原因 + quantity 件数）
      */
     public CreateOutcome createItems(String uid, JSONObject draft, int quantity) {
         int n = Math.max(1, Math.min(quantity <= 0 ? 1 : quantity, MAX_QTY));
-        String attributesJson = buildAttributes(draft);
+        JSONArray attributes = JSON.parseArray(buildAttributes(draft));
+        // 数量组件 element 7（fields 白名单禁入，仅顶层直传）：单条记录承载件数
+        JSONObject qty = new JSONObject(true);
+        qty.put("element", 7);
+        qty.put("value", n);
+        attributes.add(qty);
         int confidence = overallOf(draft);
         List<String> oriIds = new ArrayList<>();
         String firstError = null;
-        for (int i = 0; i < n; i++) {
-            JSONObject body = new JSONObject(true);
-            body.put("attributes", JSON.parseArray(attributesJson));
-            body.put("confidence", confidence);
-            body.put("source", AI_SOURCE);
-            try {
-                var result = itemWritePort.addItem(uid, body);
-                if (result.isSuccess() && result.getResult() != null) {
-                    oriIds.add(oriIdOf(result.getResult()));
-                } else if (firstError == null) {
-                    firstError = result.getMessage();
-                }
-            } catch (Exception e) {
-                log.error("[ai-tools] add_item 失败 uid={} n={}", uid, n, e);
-                if (firstError == null) {
-                    firstError = e.getMessage();
-                }
+        JSONObject body = new JSONObject(true);
+        body.put("attributes", attributes);
+        body.put("confidence", confidence);
+        body.put("source", AI_SOURCE);
+        try {
+            var result = itemWritePort.addItem(uid, body);
+            if (result.isSuccess() && result.getResult() != null) {
+                oriIds.add(oriIdOf(result.getResult()));
+            } else {
+                firstError = result.getMessage();
             }
+        } catch (Exception e) {
+            log.error("[ai-tools] add_item 失败 uid={} qty={}", uid, n, e);
+            firstError = e.getMessage();
         }
-        return new CreateOutcome(oriIds, firstError, n);
+        return new CreateOutcome(oriIds, firstError, 1, n);
     }
 
     // ================================ 读路径（thin 包装） ================================
@@ -227,8 +229,9 @@ public class ItemTools {
     }
 
     /**
-     * 创建结果（record）：oriIds 成功 oriId 清单；firstError 首个失败原因；total 请求件数
+     * 创建结果（record）：oriIds 成功 oriId 清单；firstError 首个失败原因；
+     * total 尝试创建的记录数（单条=1）；quantity 本次件数（数量 ×N）
      */
-    public record CreateOutcome(List<String> oriIds, String firstError, int total) {
+    public record CreateOutcome(List<String> oriIds, String firstError, int total, int quantity) {
     }
 }
