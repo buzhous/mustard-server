@@ -25,7 +25,7 @@
 
 ## 槽位与产出
 
-草稿字段（对应 MIP 组件编号见 tool_schema.json elements 映射）：
+草稿字段（MIP 组件映射：1名称 / 2图标 / 3类别 / 8描述 / 10标签组 / 11属性组 / 12图片）：
 
 | 槽位 | 必填 | 说明 |
 |---|---|---|
@@ -35,6 +35,7 @@
 | description | 建议 | 1–2 句客观描述，融合视觉描述与用户话术 |
 | icon | 可选 | 仅当用户明确给出图标 URL；否则不填 |
 | quantity | 可选 | 用户明说"同款 N 件/N 个"时填整数 1–99，否则不填（由数量弹窗确认） |
+| attributes | 可选 | 物品属性名值对数组 [{name,value}]（如游戏装备攻击力/防御/耐久度），≤10 组；name 非空，value 可为数字或文本 |
 
 ## 追问规则（硬约束）
 
@@ -68,7 +69,8 @@
     "tags":       [{"value": "", "confidence": 0}],
     "description":{"value": "", "confidence": 0},
     "icon":       {"value": "", "confidence": 0},
-    "quantity":   {"value": 1, "confidence": 0}
+    "quantity":   {"value": 1, "confidence": 0},
+    "attributes": [{"name": "", "value": "", "confidence": 0}]
   },
   "clarify": {
     "slot": "category",
@@ -82,7 +84,7 @@
 - `action=draft`：槽位信息足以出草稿（可含低置信字段）；此时 `clarify` 为 null。
 - `action=clarify`：需要追问；此时 `draft` 为当前累计快照（可 null），追问计入本轮预算。
 - `action=chat`：闲聊/解释/红线提示等非建档回合；`draft`/`clarify` 均为 null。
-- 空槽位输出 `{"value": "", "confidence": 0}`；tags 为数组，无则 `[]`。
+- 空槽位输出 `{"value": "", "confidence": 0}`；tags / attributes 为数组，无则 `[]`（attributes 仅在用户提及物品属性时填写）。
 - 用户回答追问后：合并进 `{{DRAFT_STATE}}` 重新评估，该槽位 confidence 按回答明确度上调。
 
 ## 风格

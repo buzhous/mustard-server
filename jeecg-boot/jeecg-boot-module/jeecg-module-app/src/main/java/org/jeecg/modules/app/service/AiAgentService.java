@@ -48,6 +48,8 @@ public class AiAgentService {
     private static final int MAX_QTY = 99;
     /** 标签上限（MIP 校验 E-TAGS：≤3） */
     private static final int MAX_TAGS = 3;
+    /** 属性组上限（element 11 属性组） */
+    private static final int MAX_ATTRIBUTES = 10;
     /** AI 专属凭据标记 */
     private static final String AI_CREDENTIAL_MARK = "ai_assistant";
 
@@ -369,7 +371,7 @@ public class AiAgentService {
     /** 草稿合并：base（会话快照）+ patch（模型本轮产出），回答追问时由模型负责合并，此处做结构兜底 */
     private JSONObject mergeDraft(String baseJson, JSONObject patch, List<UserCategory> categories) {
         JSONObject draft = new JSONObject(true);
-        for (String key : List.of("name", "category", "tags", "description", "icon", "quantity")) {
+        for (String key : List.of("name", "category", "tags", "description", "icon", "quantity", "attributes")) {
             if (baseJson != null && !baseJson.equals("null")) {
                 try {
                     JSONObject base = JSON.parseObject(baseJson);
@@ -385,7 +387,7 @@ public class AiAgentService {
             }
         }
         if (patch != null) {
-            for (String key : List.of("name", "category", "tags", "description", "icon", "quantity")) {
+            for (String key : List.of("name", "category", "tags", "description", "icon", "quantity", "attributes")) {
                 Object slotValue = patch.get(key);
                 if (slotValue instanceof JSONObject || slotValue instanceof JSONArray) {
                     draft.put(key, slotValue);
@@ -478,8 +480,8 @@ public class AiAgentService {
     }
 
     /**
-     * 创建 attributes（tool_schema.json elements_map 白名单）：
-     * 1 名称 / 2 图标 / 3 类别 / 8 描述 / 10 标签组 / 12 图片；每件数量默认 1（N 件=N 行）
+     * 创建 attributes（组件映射内联：1名称/2图标/3类别/8描述/10标签组/11属性组）：
+     * 每件数量默认 1（N 件=N 行）
      */
     private String buildAttributes(JSONObject draft) {
         JSONArray attributes = new JSONArray();
@@ -506,6 +508,26 @@ public class AiAgentService {
             }
             if (!tagValues.isEmpty()) {
                 attributes.add(attr(10, tagValues));
+            }
+        }
+        // 属性组（element 11）：系统属性模型为「属性名+颜色」（ElementAttributeVO 无 value 字段），
+        // 故把值并入名称落库（如「攻击力：120」），详情属性卡直接展示完整信息
+        JSONArray attrs = draft.getJSONArray("attributes");
+        if (attrs != null && !attrs.isEmpty()) {
+            JSONArray pairs = new JSONArray();
+            for (int i = 0; i < Math.min(attrs.size(), MAX_ATTRIBUTES); i++) {
+                JSONObject p = attrs.getJSONObject(i);
+                if (p == null || StrUtil.isBlank(p.getString("name"))) {
+                    continue;
+                }
+                String name = p.getString("name").trim();
+                String value = p.get("value") == null ? "" : String.valueOf(p.get("value")).trim();
+                JSONObject pair = new JSONObject(true);
+                pair.put("name", value.isEmpty() ? name : name + "：" + value);
+                pairs.add(pair);
+            }
+            if (!pairs.isEmpty()) {
+                attributes.add(attr(11, pairs));
             }
         }
         return attributes.toJSONString();

@@ -20,8 +20,10 @@ import java.util.Set;
  */
 public final class MipValidator {
 
-    /** 必填三要素 */
+    /** Profile 侧必填三要素（模板配置强制 1/2/3） */
     private static final Set<Integer> REQUIRED = Set.of(1, 2, 3);
+    /** 实例级必填（1名称/3类别）；图标(2) 实例级可缺省——AI 建档 icon 为可选槽位，App 端按空图标走本地占位展示 */
+    private static final Set<Integer> INSTANCE_REQUIRED = Set.of(1, 3);
 
     private MipValidator() {
     }
@@ -59,7 +61,7 @@ public final class MipValidator {
             }
             validateValue(errs, el, type, value);
         }
-        for (int r : REQUIRED) {
+        for (int r : INSTANCE_REQUIRED) {
             if (!seen.contains(r)) {
                 errs.add("E-REQ|缺少必填组件 " + r);
             }
