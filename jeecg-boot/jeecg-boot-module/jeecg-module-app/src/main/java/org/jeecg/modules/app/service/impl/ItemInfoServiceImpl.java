@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.enums.ItemStatusEnum;
+import org.jeecg.modules.app.bean.enums.SyncStatusEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoCreateVO;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoQueryVO;
@@ -229,6 +230,12 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
     public Page<ItemInfo> listByCondition(ItemInfoQueryVO queryVO) {
         LambdaQueryWrapper<ItemInfo> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ItemInfo::getUserId, queryVO.getUserId());
+        // 回收站/已销毁物品不参与检索：移入回收站（全量删除）后同步记录置 DESTROYED(3)，
+        // 彻底删除后 DESTROYED 同步记录被物理清除——故仅当存在未销毁的同步记录时物品仍在库；
+        // 部分删除只扣数量、同步记录保留，物品正常可见（ItemSync.itemId = ItemInfo.id 字符串）
+        wrapper.exists("select 1 from tbl_item_sync s where s.item_id = cast(tbl_item_info.id as char)"
+                + " and s.user_id = tbl_item_info.user_id and (s.status is null or s.status <> "
+                + SyncStatusEnum.DESTROYED.getCode() + ")");
         if (ObjectUtil.isNotEmpty(queryVO.getKeyword())) {
             String keyword = queryVO.getKeyword().trim();
             wrapper.and(q -> q.like(ItemInfo::getName, keyword).or().like(ItemInfo::getDescription, keyword));
@@ -255,6 +262,22 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         if (ObjectUtil.isNotEmpty(queryVO.getTag())) {
             // 标签随 fields JSON（element 10 标签组）落库，走模糊匹配
             wrapper.like(ItemInfo::getFields, queryVO.getTag().trim());
+        }
+        if (queryVO.getPriceMin() != null) {
+            wrapper.ge(ItemInfo::getPrice, queryVO.getPriceMin());
+        }
+        if (queryVO.getPriceMax() != null) {
+            wrapper.le(ItemInfo::getPrice, queryVO.getPriceMax());
+        }
+        if (queryVO.getCreateTimeStart() != null) {
+            wrapper.ge(ItemInfo::getCreateTime, queryVO.getCreateTimeStart());
+        }
+        if (queryVO.getCreateTimeEnd() != null) {
+            wrapper.le(ItemInfo::getCreateTime, queryVO.getCreateTimeEnd());
+        }
+        if (ObjectUtil.isNotEmpty(queryVO.getStationIds())) {
+            // 多仓位组查询（AI 对话查询：仓库名称解析后的 id 组）
+            wrapper.in(ItemInfo::getStationId, queryVO.getStationIds());
         }
         // 排序字段白名单，防注入
         Map<String, SFunction<ItemInfo, ?>> sortColumns = Map.of(

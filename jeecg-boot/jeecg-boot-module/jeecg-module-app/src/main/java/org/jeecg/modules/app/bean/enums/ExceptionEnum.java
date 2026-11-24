@@ -62,8 +62,7 @@ public enum ExceptionEnum {
     COUPON_NOT_BELONG_TO_USER(10508, "优惠券不属于该用户"),
     COUPON_ALREADY_USED(10509, "优惠券已使用"),
     COUPON_EXPIRED(10510, "优惠券已过期"),
-    // 用户分类 10730-10740
-    CATEGORY_LIMIT_EXCEEDED(10730, "非会员最多拥有5个分类，开通VIP解锁更多"),
+    // 用户分类 10730-10740（分类数量限制已移除，10730 保留号段）
     // 仓库删除 10740-10750
     STATION_DEFAULT_CANNOT_DELETE(10740, "默认仓库不可删除，请先将其他仓库设为默认仓"),
     STATION_NOT_EMPTY(10741, "仓库下仍有物品，移出所有物品后才能删除"),

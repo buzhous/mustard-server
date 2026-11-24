@@ -7,6 +7,8 @@ import lombok.experimental.Accessors;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -47,6 +49,21 @@ public class ItemInfoQueryVO implements Serializable {
 
     @Schema(description = "标签名（fields JSON 模糊匹配）")
     private String tag;
+
+    @Schema(description = "价格区间下限（元，含；AI 对话查询）")
+    private BigDecimal priceMin;
+
+    @Schema(description = "价格区间上限（元，含；AI 对话查询）")
+    private BigDecimal priceMax;
+
+    @Schema(description = "建档时间区间起点（含；AI 对话查询）")
+    private Date createTimeStart;
+
+    @Schema(description = "建档时间区间终点（含；AI 对话查询）")
+    private Date createTimeEnd;
+
+    @Schema(description = "多仓位ID列表（AI 对话查询：仓库名称解析后的 id 组）")
+    private List<String> stationIds;
 
     @Schema(description = "排序字段：created/name/price/quantity/status")
     private String orderBy;
