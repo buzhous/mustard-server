@@ -73,4 +73,37 @@ public class AppAiChatController {
         }
         return Result.OK(messageService.listBySession(uid, sessionId));
     }
+
+    @Operation(summary = "重命名会话")
+    @PostMapping("/session/rename")
+    public Result<AiChatSession> renameSession(@RequestParam(name = "sessionId") String sessionId,
+                                               @RequestParam(name = "title") String title) {
+        String uid = authPort.currentUid();
+        if (ObjectUtil.isEmpty(uid)) {
+            return Result.error(AiErrorEnum.USER_INFO_NOT_EXIST.getMsg());
+        }
+        return Result.OK(sessionService.rename(uid, sessionId, title));
+    }
+
+    @Operation(summary = "置顶/取消置顶会话")
+    @PostMapping("/session/pin")
+    public Result<AiChatSession> pinSession(@RequestParam(name = "sessionId") String sessionId,
+                                            @RequestParam(name = "pinned") boolean pinned) {
+        String uid = authPort.currentUid();
+        if (ObjectUtil.isEmpty(uid)) {
+            return Result.error(AiErrorEnum.USER_INFO_NOT_EXIST.getMsg());
+        }
+        return Result.OK(sessionService.setPinned(uid, sessionId, pinned));
+    }
+
+    @Operation(summary = "删除会话（软删，消息随会话不可见）")
+    @PostMapping("/session/delete")
+    public Result<String> deleteSession(@RequestParam(name = "sessionId") String sessionId) {
+        String uid = authPort.currentUid();
+        if (ObjectUtil.isEmpty(uid)) {
+            return Result.error(AiErrorEnum.USER_INFO_NOT_EXIST.getMsg());
+        }
+        sessionService.softDelete(uid, sessionId);
+        return Result.OK("删除成功");
+    }
 }

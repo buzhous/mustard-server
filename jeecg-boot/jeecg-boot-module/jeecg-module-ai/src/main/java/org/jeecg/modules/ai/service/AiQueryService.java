@@ -24,6 +24,7 @@ import org.jeecg.modules.ai.port.ItemReadPort;
 import org.jeecg.modules.ai.port.TaxonomyPort;
 import org.jeecg.modules.ai.service.impl.AiChatMessageServiceImpl;
 import org.jeecg.modules.ai.service.impl.AiChatSessionServiceImpl;
+import org.jeecg.modules.ai.stream.AiStreamSink;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
@@ -129,17 +130,27 @@ public class AiQueryService {
      * → 第二段结果回答（模型失败走确定性模板兜底）→ query_result 消息落库。
      */
     public AiChatSendVO send(String uid, String sessionId, String text, List<String> images) {
+        return send(uid, sessionId, text, images, null);
+    }
+
+    /**
+     * 对话式查询（可带流式事件汇）：sink 非空为 SSE 通道——assistant 消息落库即推、解析阶段事件推送，
+     * 限流由端点前置（此处跳过防双重计数）；sink 为空为旧一次性 POST 行为，完全不变。
+     */
+    public AiChatSendVO send(String uid, String sessionId, String text, List<String> images, AiStreamSink sink) {
         AiChatSession session = sessionService.getOwned(uid, sessionId);
         if (session == null) {
             throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
         }
-        String limitError = rateLimiter.tryAcquireChat(uid);
-        if (limitError != null) {
-            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR, limitError);
+        if (sink == null) {
+            String limitError = rateLimiter.tryAcquireChat(uid);
+            if (limitError != null) {
+                throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR, limitError);
+            }
         }
         List<String> imgs = images == null ? List.of() : images.stream().limit(3).toList();
         AiChatMessage userMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_USER,
-                AiChatMessage.TYPE_TEXT, text, imgs, null, null, null);
+                AiChatMessage.TYPE_TEXT, text, imgs, null, null, null, sink);
 
         List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
         // 用户仓位清单（虚拟仓 + 绑定真实站点仓）：station 参数解析为 stationIds 组查询
@@ -176,6 +187,9 @@ public class AiQueryService {
             o.put("type", s.getType());
             stationView.add(o);
         }
+        if (sink != null) {
+            sink.progress("parsing");
+        }
         JSONObject intent = callStructured(stage1Prompt()
                 .replace("{{USER_CATEGORIES}}", categoryView.toJSONString())
                 .replace("{{USER_STATIONS}}", stationView.toJSONString())
@@ -190,7 +204,7 @@ public class AiQueryService {
             if (reply == null) {
                 reply = "我可以帮你查物品，比如「我有多少双鞋」或「帮我把漫画分类的物品列出来」";
             }
-            return finishText(uid, sessionId, session, userMsg, reply);
+            return finishText(uid, sessionId, session, userMsg, reply, sink);
         }
 
         // 参数白名单校验 + 服务端执行（uid 圈定所有权，仅输出安全摘要字段）
@@ -216,7 +230,7 @@ public class AiQueryService {
         }
         if (card == null) {
             return finishText(uid, sessionId, session, userMsg,
-                    "没有找到这件物品，说下它的名字我帮你查查看");
+                    "没有找到这件物品，说下它的名字我帮你查查看", sink);
         }
 
         // 第二段：结果回答（模型失败走确定性模板兜底）
@@ -228,7 +242,7 @@ public class AiQueryService {
         }
 
         AiChatMessage resultMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                AiChatMessage.TYPE_QUERY_RESULT, clip(reply, 200), null, null, card.toJSONString(), null);
+                AiChatMessage.TYPE_QUERY_RESULT, clip(reply, 200), null, null, card.toJSONString(), null, sink);
         touchSession(session, text, reply);
         return new AiChatSendVO().setSessionId(sessionId)
                 .setSessionStatus(session.getStatus())
@@ -807,9 +821,9 @@ public class AiQueryService {
     }
 
     private AiChatSendVO finishText(String uid, String sessionId, AiChatSession session,
-                                    AiChatMessage userMsg, String reply) {
+                                    AiChatMessage userMsg, String reply, AiStreamSink sink) {
         AiChatMessage msg = appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                AiChatMessage.TYPE_TEXT, clip(reply, 200), null, null, null, null);
+                AiChatMessage.TYPE_TEXT, clip(reply, 200), null, null, null, null, sink);
         touchSession(session, null, reply);
         return new AiChatSendVO().setSessionId(sessionId)
                 .setSessionStatus(session.getStatus())
@@ -826,7 +840,7 @@ public class AiQueryService {
 
     private AiChatMessage appendMessage(String uid, String sessionId, String role, String type,
                                         String content, List<String> images, String processEntries,
-                                        String draftSnapshot, Integer confidence) {
+                                        String draftSnapshot, Integer confidence, AiStreamSink sink) {
         AiChatMessage msg = new AiChatMessage()
                 .setSessionId(sessionId)
                 .setUid(uid)
@@ -837,7 +851,12 @@ public class AiQueryService {
                 .setProcessEntries(processEntries)
                 .setDraftSnapshot(draftSnapshot)
                 .setConfidence(confidence);
-        return messageService.append(msg);
+        AiChatMessage saved = messageService.append(msg);
+        // SSE 通道：assistant 消息落库即推（用户消息不推，App 端有乐观气泡）
+        if (sink != null && AiChatMessage.ROLE_ASSISTANT.equals(role)) {
+            sink.message(saved);
+        }
+        return saved;
     }
 
     // ================================ 私有：通用 ================================

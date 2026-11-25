@@ -2,6 +2,7 @@ package org.jeecg.modules.ai.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -43,6 +44,13 @@ public class AiChatSession implements Serializable {
 
     @Schema(description = "状态：active进行中 filed已入库")
     private String status;
+
+    @Schema(description = "置顶：0否 1是")
+    private Integer pinned;
+
+    @Schema(description = "是否删除:0否,1是（软删，消息随会话不可见）")
+    @TableLogic
+    private Integer delFlag;
 
     @Schema(description = "最后一条消息摘要（会话面板展示）")
     private String lastSummary;

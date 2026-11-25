@@ -223,7 +223,37 @@ public class ItemTools {
 
     private String str(JSONObject draft, String key) {
         JSONObject slot = draft.getJSONObject(key);
-        return slot == null ? null : StrUtil.trimToNull(slot.getString("value"));
+        if (slot == null) {
+            return null;
+        }
+        // 字符串槽位（name/category/description）：LLM 误输出数字（如 description: 0）
+        // 时不落库；fastjson getString 会把数字转成 "0" 字符串，必须先做类型判断
+        Object value = slot.get("value");
+        if (!(value instanceof String s)) {
+            return null;
+        }
+        return StrUtil.trimToNull(s);
+    }
+
+    /**
+     * 真实图片建档：icon 槽位直填本轮首图（URL），App 预览卡片按 URL 渲染照片封面；
+     * 覆盖 LLM 的图标名提名（有真实照片时照片优先于示意图标）。
+     * mock 模拟建档不调用（保持 iconpark 图标名设计）
+     */
+    public void injectCoverImage(JSONObject draft, List<String> images) {
+        if (images == null || images.isEmpty()) {
+            return;
+        }
+        String cover = StrUtil.trimToNull(images.get(0));
+        if (cover == null) {
+            return;
+        }
+        JSONObject icon = draft.getJSONObject("icon");
+        if (icon == null) {
+            icon = new JSONObject(true);
+            draft.put("icon", icon);
+        }
+        icon.put("value", cover);
     }
 
     private String oriIdOf(JSONObject instance) {

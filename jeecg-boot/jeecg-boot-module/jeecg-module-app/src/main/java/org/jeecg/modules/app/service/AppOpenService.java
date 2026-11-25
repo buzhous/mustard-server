@@ -217,8 +217,9 @@ public class AppOpenService {
     @SuppressWarnings({"unchecked", "rawtypes"})
     public Result<JSONObject> addItem(OpenAppCredential credential, JSONObject body, String idempotencyKey) {
         JSONArray attributes = body == null ? null : body.getJSONArray("attributes");
-        if (attributes == null || attributes.isEmpty()) {
-            return Result.error(400, "attributes 不能为空");
+        // attributes 非必填项：为空不校验、不拒绝（AI mock 模拟建档空载荷放行），非空时逐条转换
+        if (attributes == null) {
+            attributes = new JSONArray();
         }
         Integer confidence = body.getInteger("confidence");
         if (confidence == null || confidence < 0 || confidence > 100) {
@@ -277,7 +278,7 @@ public class AppOpenService {
             Result<JSONObject> fail = new Result<>();
             fail.setCode(422);
             fail.setSuccess(false);
-            fail.setMessage("MIP 校验失败：attributes 不满足必填/类型/同步约束");
+            fail.setMessage("MIP 校验失败：attributes 不满足类型/同步约束");
             fail.setResult(errorBody);
             return fail;
         }
@@ -441,7 +442,7 @@ public class AppOpenService {
             Result<JSONObject> fail = new Result<>();
             fail.setCode(422);
             fail.setSuccess(false);
-            fail.setMessage("MIP 校验失败：attributes 不满足必填/类型/同步约束");
+            fail.setMessage("MIP 校验失败：attributes 不满足类型/同步约束");
             fail.setResult(errorBody);
             return fail;
         }

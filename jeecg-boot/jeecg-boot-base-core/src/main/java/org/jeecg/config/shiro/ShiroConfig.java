@@ -277,6 +277,10 @@ public class ShiroConfig {
         securityManager.setSubjectDAO(subjectDAO);
         //自定义缓存实现,使用redis
         securityManager.setCacheManager(redisCacheManager());
+        // 绑定 VM 单例：SSE 等 Spring MVC 异步派发线程无 Shiro ThreadContext，
+        // DispatcherServlet 收尾时 SecurityUtils.getSubject() 需要静态 SecurityManager 兜底，
+        // 否则抛 UnavailableSecurityManagerException 导致异步响应被容器中止（缺 chunked 终止块）
+        org.apache.shiro.SecurityUtils.setSecurityManager(securityManager);
         return securityManager;
     }
 

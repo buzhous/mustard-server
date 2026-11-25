@@ -42,6 +42,7 @@ public class AiChatSessionServiceImpl
         }
         return this.list(new LambdaQueryWrapper<AiChatSession>()
                 .eq(AiChatSession::getUid, uid)
+                .orderByDesc(AiChatSession::getPinned)
                 .orderByDesc(AiChatSession::getUpdateTime)
                 .last("limit " + MAX_SESSIONS));
     }
@@ -61,5 +62,45 @@ public class AiChatSessionServiceImpl
     @Override
     public void touch(AiChatSession session) {
         this.updateById(session);
+    }
+
+    @Override
+    public AiChatSession rename(String uid, String sessionId, String title) {
+        AiChatSession session = getOwned(uid, sessionId);
+        if (session == null) {
+            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        String name = StrUtil.trimToEmpty(title);
+        if (StrUtil.isEmpty(name)) {
+            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        if (name.length() > 50) {
+            name = name.substring(0, 50);
+        }
+        session.setTitle(name);
+        this.updateById(session);
+        return session;
+    }
+
+    @Override
+    public AiChatSession setPinned(String uid, String sessionId, boolean pinned) {
+        AiChatSession session = getOwned(uid, sessionId);
+        if (session == null) {
+            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        session.setPinned(pinned ? 1 : 0);
+        this.updateById(session);
+        return session;
+    }
+
+    @Override
+    public void softDelete(String uid, String sessionId) {
+        AiChatSession session = getOwned(uid, sessionId);
+        if (session == null) {
+            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        // 软删：del_flag=1（@TableLogic 自动转 update）；消息表不清理，
+        // 会话入口（getOwned/listByUid）已过滤，消息随之不可见
+        this.removeById(sessionId);
     }
 }

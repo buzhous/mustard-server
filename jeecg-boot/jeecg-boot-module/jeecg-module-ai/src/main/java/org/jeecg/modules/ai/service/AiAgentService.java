@@ -19,6 +19,7 @@ import org.jeecg.modules.ai.entity.AiChatSession;
 import org.jeecg.modules.ai.port.TaxonomyPort;
 import org.jeecg.modules.ai.service.impl.AiChatMessageServiceImpl;
 import org.jeecg.modules.ai.service.impl.AiChatSessionServiceImpl;
+import org.jeecg.modules.ai.stream.AiStreamSink;
 import org.jeecg.modules.ai.tooling.ItemTools;
 import org.jeecg.modules.ai.tooling.TaxonomyTools;
 import org.springframework.stereotype.Service;
@@ -104,6 +105,17 @@ public class AiAgentService {
      * @param mode normal（默认，对话建档）| express（快速建档）| mock（模拟建档）
      */
     public AiChatSendVO send(String uid, String sessionId, String text, List<String> images, String mode) {
+        return send(uid, sessionId, text, images, mode, null);
+    }
+
+    /**
+     * 聊天发送（可带流式事件汇）：sink 非空为 SSE 通道——阶段/消息事件经 sink 推送，
+     * 限流由端点前置（此处跳过防双重计数）；sink 为空为旧一次性 POST 行为，完全不变。
+     *
+     * @param mode normal（默认，对话建档）| express（快速建档）| mock（模拟建档）
+     */
+    public AiChatSendVO send(String uid, String sessionId, String text, List<String> images,
+                             String mode, AiStreamSink sink) {
         if (StrUtil.isBlank(text) && (images == null || images.isEmpty())) {
             throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
         }
@@ -112,7 +124,7 @@ public class AiAgentService {
         boolean mock = MODE_MOCK.equals(mode) || (!express && AiIntentRouter.isMockText(text));
         // C2 意图快路径：查询语型走对话式查询管线（复用同会话/限流/消息表）
         if (!mock && AiIntentRouter.routeToQuery(text, images, null, express)) {
-            return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images);
+            return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images, sink);
         }
         AiChatSession session = sessionService.getOwned(uid, sessionId);
         if (session == null) {
@@ -121,6 +133,9 @@ public class AiAgentService {
         List<String> imgs = images == null ? List.of() : images.stream().limit(MAX_IMAGES).toList();
 
         // 解析管线（先于消息落库：intent 兜底路由命中查询时，由查询管线自行落库，避免消息重复）
+        if (sink != null && !imgs.isEmpty()) {
+            sink.progress("vision");
+        }
         String visionDesc = resolveVision(imgs, text);
         String userText = StrUtil.blankToDefault(text, "（仅图片，无文字）");
         List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
@@ -138,6 +153,9 @@ public class AiAgentService {
                 .replace("{{DRAFT_STATE}}", draftState)
                 .replace("{{USER_TEXT}}", userText);
 
+        if (sink != null) {
+            sink.progress("parsing");
+        }
         JSONObject decision = callStructured(systemPrompt, userText);
         String action = decision.getString("action");
         String reply = StrUtil.blankToDefault(decision.getString("reply"), "");
@@ -147,17 +165,20 @@ public class AiAgentService {
         // intent 兜底路由：正则未命中但模型判定为查询（仅纯文本；同轮解析结果丢弃，查询管线独立解析；
         // mock 模拟建档跳过，防模型误判 query 抢走模拟建档）
         if (!mock && AiIntentRouter.routeToQuery(text, imgs, decision.getString("intent"), express)) {
-            return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images);
+            return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images, sink);
         }
 
-        String limitError = rateLimiter.tryAcquireChat(uid);
-        if (limitError != null) {
-            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR, limitError);
+        // 限流：SSE 通道已由端点前置获取，此处仅旧一次性 POST 路径执行（防双重计数）
+        if (sink == null) {
+            String limitError = rateLimiter.tryAcquireChat(uid);
+            if (limitError != null) {
+                throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR, limitError);
+            }
         }
 
         // 1. 用户消息落库
         AiChatMessage userMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_USER,
-                AiChatMessage.TYPE_TEXT, StrUtil.nullToEmpty(text), imgs, null, null, null);
+                AiChatMessage.TYPE_TEXT, StrUtil.nullToEmpty(text), imgs, null, null, null, sink);
 
         List<AiChatMessage> assistantMsgs = new ArrayList<>();
         AiChatSendVO vo = new AiChatSendVO().setSessionId(sessionId);
@@ -174,11 +195,15 @@ public class AiAgentService {
             chipBox.put("slot", StrUtil.blankToDefault(clarify.getString("slot"), ""));
             JSONObject clarifyDraft = modelDraft == null ? null
                     : normalizeDraft(modelDraft, categories, imgs, userText);
+            // 同草稿分支：真实图片建档时 icon 槽位直填首图（mock 不注入）
+            if (!mock && clarifyDraft != null && !imgs.isEmpty()) {
+                itemTools.injectCoverImage(clarifyDraft, imgs);
+            }
             assistantMsgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                     AiChatMessage.TYPE_CLARIFY, question, null,
                     chipBox.toJSONString(),
                     clarifyDraft == null ? null : clarifyDraft.toJSONString(),
-                    null));
+                    null, sink));
             if (clarifyDraft != null) {
                 session.setDraftSnapshot(clarifyDraft.toJSONString());
             }
@@ -194,17 +219,22 @@ public class AiAgentService {
         // draft / chat（追问预算耗尽时模型返回 clarify 也降级为 draft/chat）
         if (modelDraft != null && !"chat".equals(action)) {
             JSONObject draft = normalizeDraft(modelDraft, categories, imgs, userText);
+            // 真实图片建档：icon 槽位直填本轮首图作封面（App 卡片渲染照片而非示意图标）；
+            // mock 模拟建档保持图标提名设计，不注入
+            if (!mock && !imgs.isEmpty()) {
+                itemTools.injectCoverImage(draft, imgs);
+            }
             int overall = overallOf(draft);
 
             // express 直接建档：direct=true 且 overall≥85 → 免确认创建；失败/低置信落草稿降级。
             // manualFill 非空（restricted 拦截/敏感兜底命中）→ 不自动创建，降级草稿让用户补录后确认
             if (express && Boolean.TRUE.equals(draft.getBoolean("direct")) && overall >= CONFIDENCE_GATE
                     && draft.getJSONArray("manualFill") == null) {
-                return expressCreate(uid, sessionId, session, userMsg, draft, overall, assistantMsgs, vo);
+                return expressCreate(uid, sessionId, session, userMsg, draft, overall, assistantMsgs, vo, sink);
             }
 
             AiChatMessage draftMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                    AiChatMessage.TYPE_DRAFT, reply, null, null, draft.toJSONString(), overall);
+                    AiChatMessage.TYPE_DRAFT, reply, null, null, draft.toJSONString(), overall, sink);
             assistantMsgs.add(draftMsg);
             if ("新对话".equals(session.getTitle()) && StrUtil.isNotBlank(str(draft, "name"))) {
                 session.setTitle(clip(str(draft, "name"), 20));
@@ -221,7 +251,7 @@ public class AiAgentService {
 
         // chat 闲聊/解释回合
         AiChatMessage chatMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                AiChatMessage.TYPE_TEXT, reply, null, null, null, null);
+                AiChatMessage.TYPE_TEXT, reply, null, null, null, null, sink);
         assistantMsgs.add(chatMsg);
         session.setLastSummary(clip(reply, 60));
         sessionService.touch(session);
@@ -238,7 +268,7 @@ public class AiAgentService {
      */
     private AiChatSendVO expressCreate(String uid, String sessionId, AiChatSession session,
                                        AiChatMessage userMsg, JSONObject draft, int overall,
-                                       List<AiChatMessage> assistantMsgs, AiChatSendVO vo) {
+                                       List<AiChatMessage> assistantMsgs, AiChatSendVO vo, AiStreamSink sink) {
         // proposed 执行（失败回退不阻塞）
         applyProposed(uid, draft);
         int quantity = draftQuantity(draft);
@@ -253,14 +283,14 @@ public class AiAgentService {
         process.put("itemIds", outcome.oriIds());
         process.put("express", true);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null));
+                AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null, sink));
 
         if (outcome.oriIds().isEmpty()) {
             // 降级：落草稿卡走手动确认
             String reply = "自动建档失败（" + StrUtil.blankToDefault(outcome.firstError(), "未知原因")
                     + "），已生成草稿，请确认后手动创建";
             AiChatMessage draftMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                    AiChatMessage.TYPE_DRAFT, reply, null, null, draft.toJSONString(), overall);
+                    AiChatMessage.TYPE_DRAFT, reply, null, null, draft.toJSONString(), overall, sink);
             msgs.add(draftMsg);
             session.setDraftSnapshot(draft.toJSONString());
             session.setLastSummary(clip(reply, 60));
@@ -279,7 +309,7 @@ public class AiAgentService {
         receiptBox.put("itemIds", outcome.oriIds());
         receiptBox.put("express", true);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null));
+                AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null, sink));
         if ("新对话".equals(session.getTitle()) && StrUtil.isNotBlank(str(draft, "name"))) {
             session.setTitle(clip(str(draft, "name"), 20));
         }
@@ -349,7 +379,7 @@ public class AiAgentService {
         process.put("fail", outcome.total() - oriIds.size());
         process.put("itemIds", oriIds);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null));
+                AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null, null));
         AiChatCreateVO vo = new AiChatCreateVO().setSessionId(sessionId)
                 .setTotal(n).setCount(oriIds.isEmpty() ? 0 : n).setItemIds(oriIds);
         if (oriIds.isEmpty()) {
@@ -361,7 +391,7 @@ public class AiAgentService {
             receiptBox.put("count", n);
             receiptBox.put("itemIds", oriIds);
             msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
-                    AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null));
+                    AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null, null));
             session.setStatus(AiChatSession.STATUS_FILED);
             session.setDraftSnapshot(null);
             session.setAskCount(0);
@@ -845,7 +875,7 @@ public class AiAgentService {
 
     private AiChatMessage appendMessage(String uid, String sessionId, String role, String type,
                                         String content, List<String> images, String processEntries,
-                                        String draftSnapshot, Integer confidence) {
+                                        String draftSnapshot, Integer confidence, AiStreamSink sink) {
         AiChatMessage msg = new AiChatMessage()
                 .setSessionId(sessionId)
                 .setUid(uid)
@@ -856,7 +886,12 @@ public class AiAgentService {
                 .setProcessEntries(processEntries)
                 .setDraftSnapshot(draftSnapshot)
                 .setConfidence(confidence);
-        return messageService.append(msg);
+        AiChatMessage saved = messageService.append(msg);
+        // SSE 通道：assistant 消息落库即推（用户消息不推，App 端有乐观气泡）
+        if (sink != null && AiChatMessage.ROLE_ASSISTANT.equals(role)) {
+            sink.message(saved);
+        }
+        return saved;
     }
 
     private String prompt() {

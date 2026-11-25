@@ -13,14 +13,29 @@ public interface IAiChatSessionService extends IService<AiChatSession> {
     AiChatSession createSession(String uid);
 
     /**
-     * 会话列表（更新时间倒序，上限 50）
+     * 会话列表（置顶优先，组内更新时间倒序，上限 50，软删自动过滤）
      */
     List<AiChatSession> listByUid(String uid);
 
     /**
-     * 取归属校验后的会话（不存在或不属于当前用户返回 null）
+     * 取归属校验后的会话（不存在或不属于当前用户返回 null，软删自动过滤）
      */
     AiChatSession getOwned(String uid, String sessionId);
+
+    /**
+     * 重命名会话（归属校验，标题去首尾空白、截断 50 字）
+     */
+    AiChatSession rename(String uid, String sessionId, String title);
+
+    /**
+     * 置顶/取消置顶（归属校验）
+     */
+    AiChatSession setPinned(String uid, String sessionId, boolean pinned);
+
+    /**
+     * 软删会话（del_flag=1，消息随会话查询入口不可见，无需级联清理消息表）
+     */
+    void softDelete(String uid, String sessionId);
 
     /**
      * 更新会话元信息（标题/状态/摘要/追问计数/草稿快照），触摸 update_time

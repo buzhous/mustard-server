@@ -22,8 +22,9 @@ public final class MipValidator {
 
     /** Profile 侧必填三要素（模板配置强制 1/2/3） */
     private static final Set<Integer> REQUIRED = Set.of(1, 2, 3);
-    /** 实例级必填（1名称/3类别）；图标(2) 实例级可缺省——AI 建档 icon 为可选槽位，App 端按空图标走本地占位展示 */
-    private static final Set<Integer> INSTANCE_REQUIRED = Set.of(1, 3);
+    /** iconpark 官方图标名形态（与 jeecg-module-ai ItemTools.ICON_KEY_PATTERN 保持一致；模块隔离自建），
+     * 如 camera / electron_dev——AI 建档（含 mock 模拟建档）icon 提名原样落库，App 端按图标名渲染、识别失败回退本地占位 */
+    private static final java.util.regex.Pattern ICON_KEY_PATTERN = java.util.regex.Pattern.compile("^[a-z0-9][a-z0-9_-]{1,47}$");
 
     private MipValidator() {
     }
@@ -37,7 +38,7 @@ public final class MipValidator {
     public static List<String> validate(JSONArray attributes, JSONObject identity) {
         List<String> errs = new ArrayList<>();
         if (attributes == null || attributes.isEmpty()) {
-            errs.add("E-REQ|缺少必填组件 1,2,3");
+            // attributes 为空不校验（非必填项）：AI mock 模拟建档/空载荷放行，不作为阻断错误
             return errs;
         }
         Set<Integer> seen = new HashSet<>();
@@ -61,11 +62,7 @@ public final class MipValidator {
             }
             validateValue(errs, el, type, value);
         }
-        for (int r : INSTANCE_REQUIRED) {
-            if (!seen.contains(r)) {
-                errs.add("E-REQ|缺少必填组件 " + r);
-            }
-        }
+        // 实例级必填已放开（attributes 非必填项，组件缺失不阻断；名称/类别语义由调用方前置把关）
         // 冗余一致性：identity 与组件 1/2/3/4 对齐（E-SYNC 以组件值为准自动回写）
         if (identity != null) {
             if (!Objects.equals(identity.getString("name"), attrStringValue(attributes, 1))) {
@@ -123,15 +120,24 @@ public final class MipValidator {
     // ================================ 私有方法 ================================
 
     private static void validateValue(List<String> errs, int el, String type, Object value) {
-        String v = value == null ? "" : String.valueOf(value).trim();
+        // 为空不校验（组件值非必填项）：null/空串/空数组/空对象一律放行，仅对非空值做类型与格式约束
+        if (value == null
+                || (value instanceof JSONArray arr && arr.isEmpty())
+                || (value instanceof JSONObject obj && obj.isEmpty())
+                || (!(value instanceof JSONArray) && String.valueOf(value).trim().isEmpty())) {
+            return;
+        }
+        String v = String.valueOf(value).trim();
         switch (type) {
             case "string", "html" -> {
-                if (v.isEmpty() || v.length() > 2000) {
+                if (v.length() > 2000) {
                     errs.add("E-LEN|" + el);
                 }
             }
             case "url" -> {
-                if (!(v.startsWith("https://") || v.startsWith("http://"))) {
+                // iconpark 官方图标名形态放行（AI mock 模拟建档 icon 提名，非 URL）
+                if (!(v.startsWith("https://") || v.startsWith("http://"))
+                        && !ICON_KEY_PATTERN.matcher(v).matches()) {
                     errs.add("E-URL|" + el);
                 }
             }

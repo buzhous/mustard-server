@@ -2,6 +2,7 @@ package org.jeecg.modules.ai.service;
 
 import cn.hutool.core.util.StrUtil;
 import org.jeecg.modules.ai.bean.vo.ai.AiChatSendVO;
+import org.jeecg.modules.ai.stream.AiStreamSink;
 
 import java.util.List;
 import java.util.regex.Pattern;
@@ -69,5 +70,13 @@ public final class AiIntentRouter {
     public static AiChatSendVO delegateQuery(AiQueryService queryService, String uid, String sessionId,
                                              String text, List<String> images) {
         return queryService.send(uid, sessionId, text, images);
+    }
+
+    /**
+     * 带流式事件汇的查询委托（SSE 通道）：sink 透传给查询管线，assistant 消息落库即推
+     */
+    public static AiChatSendVO delegateQuery(AiQueryService queryService, String uid, String sessionId,
+                                             String text, List<String> images, AiStreamSink sink) {
+        return queryService.send(uid, sessionId, text, images, sink);
     }
 }
