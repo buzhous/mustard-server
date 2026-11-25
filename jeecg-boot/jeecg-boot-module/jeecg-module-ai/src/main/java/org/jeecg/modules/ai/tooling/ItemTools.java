@@ -123,6 +123,13 @@ public class ItemTools {
                 if (value == null || (value instanceof String s && StrUtil.isBlank(s))) {
                     continue;
                 }
+                // 文本类组件（string/url/html）：LLM 误输出数字（如备注 value=0）时不落库，
+                // fastjson 会把数字转成 "0" 字符串污染字段，必须先做类型判断
+                String vt = AiComponentCatalog.valueType(element);
+                if (("string".equals(vt) || "url".equals(vt) || "html".equals(vt))
+                        && !(value instanceof String)) {
+                    continue;
+                }
                 attributes.add(attr(element, value));
             }
         }

@@ -480,16 +480,96 @@ public class AiAgentService {
         }
     }
 
+    /** 上下文窗口：最近消息条数 / 总字符预算 / 单条压缩上限（user/assistant/追问分开） */
+    private static final int HISTORY_MAX_MESSAGES = 12;
+    private static final int HISTORY_MAX_CHARS = 6000;
+    private static final int HISTORY_USER_CLIP = 200;
+    private static final int HISTORY_ASSISTANT_CLIP = 300;
+    private static final int HISTORY_ITEM_CLIP = 160;
+
+    /**
+     * 会话上下文装配：窗口 → 压缩 → 预算丢弃。
+     * 1. 窗口：只取最近 {@link #HISTORY_MAX_MESSAGES} 条消息
+     * 2. 压缩：user/assistant 文本按上限截断；draft/receipt/clarify 等组件消息
+     *    转简短摘要行（草稿快照/卡片 JSON 很长，全量拼会挤占预算）
+     * 3. 预算：总字符超 {@link #HISTORY_MAX_CHARS} 时从最旧开始丢弃，
+     *    超大上下文允许丢失部分历史，丢弃量以「更早 N 条已省略」标注给模型
+     */
     private String recentHistory(String uid, String sessionId) {
         List<AiChatMessage> recent = messageService.listBySession(uid, sessionId);
+        int windowStart = Math.max(0, recent.size() - HISTORY_MAX_MESSAGES);
+        List<String> lines = new ArrayList<>();
+        for (int i = windowStart; i < recent.size(); i++) {
+            String line = historyLine(recent.get(i));
+            if (line != null) {
+                lines.add(line);
+            }
+        }
+        int total = 0;
+        for (String line : lines) {
+            total += line.length();
+        }
+        int drop = 0;
+        while (total > HISTORY_MAX_CHARS && drop < lines.size() - 1) {
+            total -= lines.get(drop).length();
+            drop++;
+        }
         StringBuilder sb = new StringBuilder();
-        int from = Math.max(0, recent.size() - 6);
-        for (int i = from; i < recent.size(); i++) {
-            AiChatMessage m = recent.get(i);
-            sb.append(AiChatMessage.ROLE_USER.equals(m.getRole()) ? "用户" : "AI")
-                    .append(": ").append(StrUtil.blankToDefault(m.getContent(), "（草稿/过程条目）")).append('\n');
+        if (drop > 0) {
+            sb.append("（更早 ").append(drop).append(" 条消息已省略）\n");
+        }
+        for (int i = drop; i < lines.size(); i++) {
+            sb.append(lines.get(i)).append('\n');
         }
         return sb.toString();
+    }
+
+    /** 单条消息 → 历史行；组件消息转摘要行，文本消息按角色截断。返回 null 表示跳过 */
+    private String historyLine(AiChatMessage m) {
+        boolean isUser = AiChatMessage.ROLE_USER.equals(m.getRole());
+        String role = isUser ? "用户" : "AI";
+        String type = StrUtil.blankToDefault(m.getMsgType(), AiChatMessage.TYPE_TEXT);
+        switch (type) {
+            case AiChatMessage.TYPE_DRAFT: {
+                String name = draftNameOf(m.getDraftSnapshot());
+                return role + ": [出示建档草稿" + (name == null ? "" : "：" + name) + "]";
+            }
+            case AiChatMessage.TYPE_RECEIPT: {
+                return role + ": " + clip(StrUtil.blankToDefault(m.getContent(), "[已创建物品档案]"), 60);
+            }
+            case AiChatMessage.TYPE_CLARIFY: {
+                return role + ": [追问] " + clip(StrUtil.blankToDefault(m.getContent(), ""), HISTORY_ITEM_CLIP);
+            }
+            case AiChatMessage.TYPE_PROCESS: {
+                return null; // 解析过程条目对后续决策无价值，直接跳过
+            }
+            case AiChatMessage.TYPE_QUERY_RESULT: {
+                return role + ": [查询结果] " + clip(StrUtil.blankToDefault(m.getContent(), ""), HISTORY_ASSISTANT_CLIP);
+            }
+            default: {
+                String content = StrUtil.blankToDefault(m.getContent(), "");
+                if (StrUtil.isNotBlank(m.getImages())) {
+                    content = "[图片] " + content;
+                }
+                if (StrUtil.isBlank(content.replace("[图片]", "").trim())) {
+                    return null; // 纯图片且无文字的过程消息：LLM 已有本轮视觉描述，历史中无增量价值
+                }
+                return role + ": " + clip(content, isUser ? HISTORY_USER_CLIP : HISTORY_ASSISTANT_CLIP);
+            }
+        }
+    }
+
+    /** 草稿快照中的物品名（name 槽位 value），解析失败返回 null */
+    private String draftNameOf(String draftSnapshot) {
+        if (StrUtil.isBlank(draftSnapshot)) {
+            return null;
+        }
+        try {
+            JSONObject slot = JSON.parseObject(draftSnapshot).getJSONObject("name");
+            return slot == null ? null : StrUtil.trimToNull(slot.getString("value"));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private JSONObject callStructured(String systemPrompt, String userText) {
@@ -915,7 +995,15 @@ public class AiAgentService {
 
     private String str(JSONObject draft, String key) {
         JSONObject slot = draft.getJSONObject(key);
-        return slot == null ? null : StrUtil.trimToNull(slot.getString("value"));
+        if (slot == null) {
+            return null;
+        }
+        // 字符串槽位：LLM 误输出数字（如 name: 0）时 fastjson getString 会转成 "0"，先做类型判断
+        Object value = slot.get("value");
+        if (!(value instanceof String s)) {
+            return null;
+        }
+        return StrUtil.trimToNull(s);
     }
 
     private JSONObject slot(String value, int confidence) {
