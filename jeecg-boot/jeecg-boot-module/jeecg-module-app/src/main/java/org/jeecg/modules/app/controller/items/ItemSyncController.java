@@ -21,6 +21,7 @@ import org.jeecg.modules.app.bean.vo.queue.*;
 import org.jeecg.modules.app.entity.ItemSync;
 import org.jeecg.modules.app.entity.user.AppUser;
 import org.jeecg.modules.app.service.IItemSyncService;
+import org.jeecg.modules.app.service.SyncRateLimitService;
 import org.jeecg.modules.app.utils.AppAuthUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -36,6 +37,9 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
 
     @Autowired
     private IItemSyncService itemSyncService;
+
+    @Autowired
+    private SyncRateLimitService syncRateLimitService;
 
     @Operation(summary = "同步队列列表-全量")
     @GetMapping(value = "/listAll")
@@ -111,6 +115,7 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
         if (StrUtil.isEmpty(syncReqVO.getSyncOps())) {
             return Result.error(ExceptionEnum.REQUEST_PARAM_ERROR.getMsg());
         }
+        syncRateLimitService.checkLimit(loginUser.getId());
         // 设置用户ID
         syncReqVO.setUserId(loginUser.getId());
         boolean result = false;
@@ -194,6 +199,7 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
         if (ObjectUtil.isEmpty(loginUser)) {
             return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
         }
+        syncRateLimitService.checkLimit(loginUser.getId());
         syncVO.setUserId(loginUser.getId());
         ItemSyncDownloadIncrementalRspVO downloadRspVO = itemSyncService.syncDownloadIncremental(syncVO);
         return Result.OK(downloadRspVO);
@@ -206,6 +212,7 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
         if (ObjectUtil.isEmpty(loginUser)) {
             return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
         }
+        syncRateLimitService.checkLimit(loginUser.getId());
         // 批量协议：操作类型在 item 级 syncOps（add/edit/destroy/delete 可混合），非法值由服务层进 failList
         if (ObjectUtil.isEmpty(batchVO.getItems())) {
             return Result.error("物品列表不能为空");

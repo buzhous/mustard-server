@@ -27,4 +27,10 @@ public class LockConstant {
      */
     public static final String ITEM_RECYCLE_LOCK = "lock_item_recycle:";
 
+    /**
+     * 物品销毁/删除入口锁（oriId 维度）：串行化同一物品的销毁事务，
+     * 防止并发 dropToRuins/dropToRecycle「先查后改」竞态产生殷墟/回收站双行（重复消费）
+     */
+    public static final String ITEM_DESTROY_LOCK = "lock_item_destroy:";
+
 }

@@ -37,6 +37,12 @@ public class ItemSyncDownloadIncrementalRspVO implements Serializable {
     @Schema(description = "下一页游标（时间戳）")
     private String cursor;
 
+    @Schema(description = "下一页游标时间（最后一条 update_time 毫秒）：hasMore=true 时客户端以此为 lastSyncTime 续拉")
+    private Long nextCursorTime;
+
+    @Schema(description = "下一页游标 id（update_time 同毫秒时按 id 续拉，防同毫秒漏页）")
+    private Long nextCursorId;
+
     @Schema(description = "需要新增的物品列表")
     private List<ItemSync> needAddList = new ArrayList<>();
 

@@ -6,12 +6,15 @@ import cn.hutool.core.util.ObjectUtil;
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import org.jeecg.boot.starter.lock.annotation.JLock;
 import org.jeecg.modules.app.bean.enums.ExceptionEnum;
 import org.jeecg.modules.app.bean.enums.ItemStatusEnum;
 import org.jeecg.modules.app.bean.enums.SyncOpsEnum;
 import org.jeecg.modules.app.bean.enums.SyncStatusEnum;
 import org.jeecg.modules.app.bean.exception.AppException;
+import org.jeecg.modules.app.constant.LockConstant;
 import org.jeecg.modules.app.bean.vo.inventory.ItemInventoryVO;
 import org.jeecg.modules.app.bean.vo.item.ItemInfoCreateVO;
 import org.jeecg.modules.app.bean.vo.queue.*;
@@ -161,6 +164,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         itemSync.setOriId(syncIdReqVO.getOriId());
         itemSync.setUserId(syncIdReqVO.getUserId());
         itemSync.setCategoryId("0");
+        // 预建行 status 初始为正常：避免 status=NULL 触发下游 null 判定外的隐患
+        itemSync.setStatus(ItemStatusEnum.NORMAL.getCode());
         itemSync.setVersion(1);
         itemSync.setSyncStatus(SyncStatusEnum.UNSYNCED.getCode());
 
@@ -228,7 +233,9 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
             throw new AppException(ExceptionEnum.ITEM_NOT_EXIST);
         }
 
-        if (SyncStatusEnum.DESTROYED.getCode() == itemSyncExist.getStatus()) {
+        // status 为 NULL（外部路径预建）时不得因 int unboxing 抛 NPE
+        if (itemSyncExist.getStatus() != null
+                && SyncStatusEnum.DESTROYED.getCode() == itemSyncExist.getStatus()) {
             throw new AppException(ExceptionEnum.ITEM_DESTROYED);
         }
 
@@ -236,8 +243,18 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     }
 
     private boolean updateItemSyncAndRelated(ItemSync itemSyncExist, ItemSync itemSync, ItemSyncReqVO syncReqVO) {
-        // version 兜底：开放平台创建等历史路径可能落 NULL，按 1 起算防 NPE
-        int newVersion = (itemSyncExist.getVersion() == null ? 1 : itemSyncExist.getVersion()) + 1;
+        // 乐观锁（全量严格）：产品未上线，无旧数据/旧客户端兼容负担。
+        // add/edit 上传必带 version（客户端经 makeSyncId 幂等查回最新值），
+        // 与云端不一致返回 10205，客户端按"云端为准"消费队列并立即拉取最新
+        Integer reqVersion = syncReqVO.getVersion();
+        if (reqVersion == null) {
+            throw new AppException(ExceptionEnum.REQUEST_PARAM_ERROR);
+        }
+        Integer curVersion = itemSyncExist.getVersion();
+        if (curVersion == null || !reqVersion.equals(curVersion)) {
+            throw new AppException(ExceptionEnum.ITEM_VERSION_CONFLICT);
+        }
+        int newVersion = curVersion + 1;
 
         itemSync.setId(itemSyncExist.getId());
         itemSync.setSyncStatus(SyncStatusEnum.SUCCESS.getCode());
@@ -247,7 +264,14 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         // MIP 写路径补级：fields 追加 sensitivity（服务端单点计算，幂等）
         itemSync.setFields(MipWriteSupport.enrich(itemSync.getFields()));
 
-        boolean result = this.updateById(itemSync);
+        // 条件更新（带库内当前版本约束）：读-校验-写非原子，双端并发以 SQL 层 CAS 兜底；
+        // 影响行数 0 说明版本已被并发修改，拒绝本次写入
+        boolean result = this.update(itemSync, new LambdaUpdateWrapper<ItemSync>()
+                .eq(ItemSync::getId, itemSyncExist.getId())
+                .eq(ItemSync::getVersion, curVersion));
+        if (!result) {
+            throw new AppException(ExceptionEnum.ITEM_VERSION_CONFLICT);
+        }
         
         if (result) {
             ItemInfoCreateVO itemInfoCreateVO = FieldElementUtil.convertObject(itemSync, new ItemInfoCreateVO());
@@ -265,12 +289,14 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @JLock(lockKey = "'" + LockConstant.ITEM_DESTROY_LOCK + "' + #syncVO.oriId")
     public boolean syncDestroy(ItemSyncReqVO syncVO) {
         return doDestroy(syncVO, false);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @JLock(lockKey = "'" + LockConstant.ITEM_DESTROY_LOCK + "' + #syncVO.oriId")
     public boolean syncDelete(ItemSyncReqVO syncVO) {
         return doDestroy(syncVO, true);
     }
@@ -464,17 +490,43 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         Long lastSyncTime = syncVO.getLastSyncTime();
         Date now = new Date();
 
+        // 分页（2000 人并发评估）：客户端传 pageSize>0 时启用双游标翻页
+        // （update_time 相同毫秒内按 id 续拉，防同毫秒漏页），上限 500；
+        // 缺省不分页保持全量返回，旧调用方零影响
+        Integer reqPageSize = syncVO.getPageSize();
+        boolean paged = reqPageSize != null && reqPageSize > 0;
+        int pageSize = paged ? Math.min(reqPageSize, 500) : 0;
+        Long cursorId = syncVO.getCursorId();
+
         LambdaQueryWrapper<ItemSync> queryWrapper = new QueryWrapper<ItemSync>().lambda();
         queryWrapper.eq(ItemSync::getUserId, syncVO.getUserId());
 
+        // 排除空骨架行：makeSyncId 预建行（UNSYNCED 且 fields 为空）在客户端上传失败期间
+        // 若被增量下发，会以空内容覆盖本地完整物品并丢弃待上传快照，造成数据丢失。
+        // 殷墟拾取行（UNSYNCED 但 fields 有内容）不受影响，正常下发
+        queryWrapper.and(w -> w.isNotNull(ItemSync::getFields).ne(ItemSync::getFields, ""));
+
         if (ObjectUtil.isNotEmpty(lastSyncTime) && lastSyncTime > 0) {
             Date syncDate = new Date(lastSyncTime);
-            queryWrapper.gt(ItemSync::getUpdateTime, syncDate);
+            if (paged && cursorId != null && cursorId > 0) {
+                // 双游标：(update_time, id) 单调递增，同毫秒内的行按 id 续拉
+                queryWrapper.and(w -> w.gt(ItemSync::getUpdateTime, syncDate)
+                        .or(w2 -> w2.eq(ItemSync::getUpdateTime, syncDate).gt(ItemSync::getId, cursorId)));
+            } else {
+                queryWrapper.gt(ItemSync::getUpdateTime, syncDate);
+            }
         }
 
-        queryWrapper.orderByAsc(ItemSync::getUpdateTime);
+        queryWrapper.orderByAsc(ItemSync::getUpdateTime).orderByAsc(ItemSync::getId);
+        if (paged) {
+            queryWrapper.last("LIMIT " + (pageSize + 1));
+        }
 
         List<ItemSync> allChangedItems = this.list(queryWrapper);
+        boolean hasMore = paged && allChangedItems.size() > pageSize;
+        if (hasMore) {
+            allChangedItems = allChangedItems.subList(0, pageSize);
+        }
 
         List<ItemSync> needAddOrUpdateList = new ArrayList<>();
         List<String> needDeleteList = new ArrayList<>();
@@ -503,9 +555,22 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
 
         rspVO.setNeedDeleteList(needDeleteList);
         rspVO.setTotalCount(needAddOrUpdateList.size() + needDeleteList.size());
-        // 全量记录总数（不滤 update_time）：客户端据此发现"水位线越前导致增量拉空但服务端有数据"的漏拉场景
-        rspVO.setTotal(this.count(new LambdaQueryWrapper<ItemSync>().eq(ItemSync::getUserId, syncVO.getUserId())));
-        rspVO.setHasMore(false);
+        // 全量记录总数（不滤 update_time）：客户端据此发现"水位线越前导致增量拉空但服务端有数据"的漏拉场景。
+        // 仅首页（无游标）计算，翻页沿用客户端缓存的首页值，避免每页 COUNT
+        if (!paged || cursorId == null || cursorId <= 0) {
+            rspVO.setTotal(this.count(new LambdaQueryWrapper<ItemSync>().eq(ItemSync::getUserId, syncVO.getUserId())));
+        }
+        rspVO.setHasMore(hasMore);
+        if (hasMore && !allChangedItems.isEmpty()) {
+            ItemSync lastRow = allChangedItems.get(allChangedItems.size() - 1);
+            if (lastRow.getUpdateTime() != null) {
+                rspVO.setNextCursorTime(lastRow.getUpdateTime().getTime());
+                rspVO.setNextCursorId(lastRow.getId());
+            } else {
+                // 游标行 update_time 异常为 NULL：不产生翻页游标，客户端按本页终止（total 自愈兜底）
+                rspVO.setHasMore(false);
+            }
+        }
 
         return rspVO;
     }
@@ -629,7 +694,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
             failItem.setCode(code);
             failItem.setPermanent(code == ExceptionEnum.REQUEST_PARAM_ERROR.getCode()
                     || code == ExceptionEnum.ITEM_NOT_EXIST.getCode()
-                    || code == ExceptionEnum.ITEM_DESTROYED.getCode());
+                    || code == ExceptionEnum.ITEM_DESTROYED.getCode()
+                    || code == ExceptionEnum.ITEM_VERSION_CONFLICT.getCode());
         } else {
             failItem.setCode(500);
             failItem.setPermanent(false);

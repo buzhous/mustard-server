@@ -28,6 +28,8 @@ public enum ExceptionEnum {
     INSUFFICIENT_QUANTITY(10202, "物品数量不足"),
     RUINS_ALREADY_PICKED(10203, "手慢了，已被别人拾取"),
     RUINS_PICKUP_COUPON_NOT_ENOUGH(10204, "拾取券不足，请先领取"),
+    ITEM_VERSION_CONFLICT(10205, "物品版本冲突，请拉取最新后重试"),
+    SYNC_RATE_LIMIT(10206, "同步过于频繁，请稍后重试"),
     // 赠送 10600-10700
     GIFT_NOT_EXIST(10600, "赠送记录不存在"),
     GIFT_CANCELLED(10601, "赠送已撤回"),

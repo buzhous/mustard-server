@@ -32,4 +32,10 @@ public class ItemSyncDownloadReqVO implements Serializable {
     @Schema(description = "最后同步时间戳（增量同步用，毫秒）")
     private Long lastSyncTime;
 
+    @Schema(description = "分页大小（>0 启用分页，缺省全量返回；服务端上限 500）")
+    private Integer pageSize;
+
+    @Schema(description = "翻页游标：上一页最后一条记录 id（配合 lastSyncTime=游标时间续拉，防同毫秒漏页）")
+    private Long cursorId;
+
 }
