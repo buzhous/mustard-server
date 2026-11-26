@@ -278,14 +278,14 @@ public class AiAgentService {
         JSONObject process = new JSONObject(true);
         process.put("step", "create");
         process.put("total", outcome.total());
-        process.put("ok", outcome.oriIds().size());
-        process.put("fail", outcome.total() - outcome.oriIds().size());
-        process.put("itemIds", outcome.oriIds());
+        process.put("ok", outcome.itemIds().size());
+        process.put("fail", outcome.total() - outcome.itemIds().size());
+        process.put("itemIds", outcome.itemIds());
         process.put("express", true);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                 AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null, sink));
 
-        if (outcome.oriIds().isEmpty()) {
+        if (outcome.itemIds().isEmpty()) {
             // 降级：落草稿卡走手动确认
             String reply = "自动建档失败（" + StrUtil.blankToDefault(outcome.firstError(), "未知原因")
                     + "），已生成草稿，请确认后手动创建";
@@ -306,7 +306,7 @@ public class AiAgentService {
         String receipt = "已创建（×" + outcome.quantity() + "）";
         JSONObject receiptBox = new JSONObject(true);
         receiptBox.put("count", outcome.quantity());
-        receiptBox.put("itemIds", outcome.oriIds());
+        receiptBox.put("itemIds", outcome.itemIds());
         receiptBox.put("express", true);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                 AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null, sink));
@@ -323,7 +323,7 @@ public class AiAgentService {
                 .setMessages(join(userMsg, msgs))
                 .setDraft(null)
                 .setDirect(true)
-                .setItemIds(outcome.oriIds())
+                .setItemIds(outcome.itemIds())
                 .setQuantity(outcome.quantity());
     }
 
@@ -367,29 +367,29 @@ public class AiAgentService {
         applyProposed(uid, draft);
 
         ItemTools.CreateOutcome outcome = itemTools.createItems(uid, draft, n);
-        List<String> oriIds = outcome.oriIds();
+        List<String> itemIds = outcome.itemIds();
         String firstError = outcome.firstError();
 
-        // 过程条目 + 回执（×N 标注；total/ok/fail 为记录口径，件数由回执 ×N 表达）
+        // 过程条目 + 回执（×N 标注；total/ok/fail 为记录口径，件数由回执 ×N 表达；itemIds 为云端 itemId）
         List<AiChatMessage> msgs = new ArrayList<>();
         JSONObject process = new JSONObject(true);
         process.put("step", "create");
         process.put("total", outcome.total());
-        process.put("ok", oriIds.size());
-        process.put("fail", outcome.total() - oriIds.size());
-        process.put("itemIds", oriIds);
+        process.put("ok", itemIds.size());
+        process.put("fail", outcome.total() - itemIds.size());
+        process.put("itemIds", itemIds);
         msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                 AiChatMessage.TYPE_PROCESS, null, null, process.toJSONString(), null, null, null));
         AiChatCreateVO vo = new AiChatCreateVO().setSessionId(sessionId)
-                .setTotal(n).setCount(oriIds.isEmpty() ? 0 : n).setItemIds(oriIds);
-        if (oriIds.isEmpty()) {
+                .setTotal(n).setCount(itemIds.isEmpty() ? 0 : n).setItemIds(itemIds);
+        if (itemIds.isEmpty()) {
             vo.setError(StrUtil.blankToDefault(firstError, "创建失败"));
             session.setLastSummary("创建失败");
         } else {
             String receipt = "已创建（×" + n + "）";
             JSONObject receiptBox = new JSONObject(true);
             receiptBox.put("count", n);
-            receiptBox.put("itemIds", oriIds);
+            receiptBox.put("itemIds", itemIds);
             msgs.add(appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
                     AiChatMessage.TYPE_RECEIPT, receipt, null, receiptBox.toJSONString(), null, null, null));
             session.setStatus(AiChatSession.STATUS_FILED);

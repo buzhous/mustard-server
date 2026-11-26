@@ -313,6 +313,9 @@ public class AppOpenService {
         // 返回 MIP 出域实例 + 入库状态（normal/draft）
         ItemInfo created = itemInfoService.queryItemInfo(createVO.getItemId());
         JSONObject instance = buildOutboundInstance(created, credential.getBoundUid(), true);
+        // 创建响应携带云端 itemId（tbl_item_info.id，全域定位键；离线建档规则：取得云端 itemId 即创建完成）。
+        // 在红线过滤与 content_hash 计算之后追加，不参与哈希覆盖域（identity/attributes/custody）
+        instance.put("item_id", String.valueOf(createVO.getItemId()));
         Result<JSONObject> result = Result.OK(instance);
         result.setMessage(confidence >= CONFIDENCE_THRESHOLD ? "normal" : "draft");
         redisUtil.set(idemKey, JSON.toJSONString(result), IDEM_TTL_SECONDS);

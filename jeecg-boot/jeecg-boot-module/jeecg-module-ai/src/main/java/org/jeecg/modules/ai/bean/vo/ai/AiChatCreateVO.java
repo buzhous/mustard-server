@@ -10,7 +10,7 @@ import java.io.Serializable;
 import java.util.List;
 
 /**
- * AI 建档·确认创建响应（S5）：N 件 = N 个 oriId，过程条目与回执带 ×N 标注
+ * AI 建档·确认创建响应（S5）：N 件 = N 个云端 itemId，过程条目与回执带 ×N 标注
  */
 @Data
 @Accessors(chain = true)
@@ -29,7 +29,7 @@ public class AiChatCreateVO implements Serializable {
     @Schema(description = "成功件数")
     private Integer count;
 
-    @Schema(description = "成功物品 oriId 列表（App 端按 oriId 跳转）")
+    @Schema(description = "成功物品 itemId 列表（tbl_item_info.id，App 端按 itemId 映射本地记录跳转）")
     private List<String> itemIds;
 
     @Schema(description = "首个失败原因（全部失败时返回）")

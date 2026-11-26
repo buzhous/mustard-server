@@ -140,7 +140,7 @@ public class ItemTools {
      * 创建 1 条物品记录，件数为 quantity（数量组件 element 7 顶层直传，服务端 addItem 提取为
      * ItemInfo.quantity 与库存数量；范围 1–99）。同规格多件不再拆分为多条记录。
      *
-     * @return CreateOutcome（oriIds 成功清单 + firstError 首个失败原因 + quantity 件数）
+     * @return CreateOutcome（itemIds 成功云端 itemId 清单 + firstError 首个失败原因 + quantity 件数）
      */
     public CreateOutcome createItems(String uid, JSONObject draft, int quantity) {
         int n = Math.max(1, Math.min(quantity <= 0 ? 1 : quantity, MAX_QTY));
@@ -151,7 +151,7 @@ public class ItemTools {
         qty.put("value", n);
         attributes.add(qty);
         int confidence = overallOf(draft);
-        List<String> oriIds = new ArrayList<>();
+        List<String> itemIds = new ArrayList<>();
         String firstError = null;
         JSONObject body = new JSONObject(true);
         body.put("attributes", attributes);
@@ -160,7 +160,12 @@ public class ItemTools {
         try {
             var result = itemWritePort.addItem(uid, body);
             if (result.isSuccess() && result.getResult() != null) {
-                oriIds.add(oriIdOf(result.getResult()));
+                String itemId = itemIdOf(result.getResult());
+                if (StrUtil.isNotBlank(itemId)) {
+                    itemIds.add(itemId);
+                } else {
+                    firstError = "创建响应缺失 itemId";
+                }
             } else {
                 firstError = result.getMessage();
             }
@@ -168,7 +173,7 @@ public class ItemTools {
             log.error("[ai-tools] add_item 失败 uid={} qty={}", uid, n, e);
             firstError = e.getMessage();
         }
-        return new CreateOutcome(oriIds, firstError, 1, n);
+        return new CreateOutcome(itemIds, firstError, 1, n);
     }
 
     // ================================ 读路径（thin 包装） ================================
@@ -263,18 +268,15 @@ public class ItemTools {
         icon.put("value", cover);
     }
 
-    private String oriIdOf(JSONObject instance) {
-        JSONObject identity = instance.getJSONObject("identity");
-        if (identity != null && StrUtil.isNotBlank(identity.getString("ori_id"))) {
-            return identity.getString("ori_id");
-        }
-        return StrUtil.blankToDefault(instance.getString("ori_id"), "unknown");
+    /** 创建响应出域实例的云端 itemId（顶层 item_id，AppOpenService.addItem 落库后回填） */
+    private String itemIdOf(JSONObject instance) {
+        return StrUtil.trimToNull(instance.getString("item_id"));
     }
 
     /**
-     * 创建结果（record）：oriIds 成功 oriId 清单；firstError 首个失败原因；
-     * total 尝试创建的记录数（单条=1）；quantity 本次件数（数量 ×N）
+     * 创建结果（record）：itemIds 成功云端 itemId 清单（tbl_item_info.id，全域定位键）；
+     * firstError 首个失败原因；total 尝试创建的记录数（单条=1）；quantity 本次件数（数量 ×N）
      */
-    public record CreateOutcome(List<String> oriIds, String firstError, int total, int quantity) {
+    public record CreateOutcome(List<String> itemIds, String firstError, int total, int quantity) {
     }
 }

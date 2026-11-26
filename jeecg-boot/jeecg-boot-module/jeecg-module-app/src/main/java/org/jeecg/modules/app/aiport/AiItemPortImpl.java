@@ -87,8 +87,8 @@ public class AiItemPortImpl implements ItemWritePort, ItemReadPort {
         if (anyReadWrite != null) {
             return anyReadWrite;
         }
-        // 自动创建：appName=AI 建档助手 + scope=readwrite + remark 标记（§5.6 密钥自动带入）
-        OpenAppCredential created = credentialService.addByUser(uid, "AI 建档助手");
+        // 自动创建：appName=芥灵AI + scope=readwrite + remark 标记（§5.6 密钥自动带入）
+        OpenAppCredential created = credentialService.addByUser(uid, "芥灵AI");
         created.setScope("readwrite");
         created.setRemark("source:" + AI_CREDENTIAL_MARK);
         credentialService.updateById(created);
