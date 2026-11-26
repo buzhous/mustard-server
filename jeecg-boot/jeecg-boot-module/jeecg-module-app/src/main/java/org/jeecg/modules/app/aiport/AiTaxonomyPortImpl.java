@@ -103,13 +103,29 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
         if (systemCategories.isEmpty()) {
             return refs;
         }
-        // 该用户已实例化的映射：system_id → 用户分类 id
+        // 该用户已实例化的映射：system_id → 用户分类 id（顺带记录用户分类→系统分类，备注继承用）
         Map<String, String> instantiated = new HashMap<>();
+        Map<String, String> systemIdByUserCategoryId = new HashMap<>();
         for (UserCategory c : userCategoryService.list(new LambdaQueryWrapper<UserCategory>()
                 .eq(UserCategory::getUserId, uid)
                 .isNotNull(UserCategory::getSystemId))) {
             if (StrUtil.isNotBlank(c.getSystemId())) {
                 instantiated.putIfAbsent(c.getSystemId(), c.getId());
+                systemIdByUserCategoryId.putIfAbsent(c.getId(), c.getSystemId());
+            }
+        }
+        // 系统分类备注透出（泛称/别名匹配用，如「证件」备注「身份证、护照、驾驶证等」）；
+        // 由系统分类实例化的用户分类继承备注，保证解析层在用户分类段即可命中
+        Map<String, String> remarkBySystemId = new HashMap<>();
+        for (SystemCategory s : systemCategories) {
+            if (StrUtil.isNotBlank(s.getRemark())) {
+                remarkBySystemId.put(s.getId(), s.getRemark());
+            }
+        }
+        for (AiCategoryRef ref : refs) {
+            String systemId = systemIdByUserCategoryId.get(ref.getId());
+            if (systemId != null) {
+                ref.setRemark(remarkBySystemId.get(systemId));
             }
         }
         for (SystemCategory s : systemCategories) {
@@ -117,7 +133,8 @@ public class AiTaxonomyPortImpl implements TaxonomyPort {
                     .setId(s.getId())
                     .setName(s.getName())
                     .setUser(false)
-                    .setUserCategoryId(instantiated.get(s.getId())));
+                    .setUserCategoryId(instantiated.get(s.getId()))
+                    .setRemark(StrUtil.blankToDefault(s.getRemark(), null)));
         }
         return refs;
     }

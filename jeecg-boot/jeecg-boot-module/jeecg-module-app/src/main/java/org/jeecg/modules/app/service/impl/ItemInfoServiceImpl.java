@@ -240,7 +240,12 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
                 + SyncStatusEnum.DESTROYED.getCode() + ")");
         if (ObjectUtil.isNotEmpty(queryVO.getKeyword())) {
             String keyword = queryVO.getKeyword().trim();
-            wrapper.and(q -> q.like(ItemInfo::getName, keyword).or().like(ItemInfo::getDescription, keyword));
+            // 全信息匹配：名称/描述 + 分类值（名称/名称含关键词的未分类兜底）+ fields JSON
+            // （标签组/属性组/品牌型号/序列号等结构化信息，泛称如「证件」可命中标签）
+            wrapper.and(q -> q.like(ItemInfo::getName, keyword)
+                    .or().like(ItemInfo::getDescription, keyword)
+                    .or().like(ItemInfo::getCategory, keyword)
+                    .or().like(ItemInfo::getFields, keyword));
         }
         if (ObjectUtil.isNotEmpty(queryVO.getStationId())) {
             wrapper.eq(ItemInfo::getStationId, queryVO.getStationId().trim());

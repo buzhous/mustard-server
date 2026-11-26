@@ -314,6 +314,20 @@ public class AiQueryService {
         query.setPageSize(pageSize == null ? MAX_PAGE_SIZE : pageSize);
 
         Page<AiItemRow> result = itemReadPort.listByCondition(query);
+        // 渐进放宽：keyword 与 categoryList 同时生效时 AND 语义易双空（如模型把泛称
+        // 「证件」同时塞进 keyword 与 categories，物品名「身份证」不含「证件」）。
+        // 全量 0 行时依次丢 keyword → 丢 categoryList 重试，最大化召回
+        if (result.getTotal() == 0 && query.getKeyword() != null
+                && query.getCategoryList() != null && !query.getCategoryList().isEmpty()) {
+            result = itemReadPort.listByCondition(new AiItemQuery(query)
+                    .setKeyword(null));
+            if (result.getTotal() == 0) {
+                result = itemReadPort.listByCondition(new AiItemQuery(query)
+                        .setCategoryList(null)
+                        .setKeyword(relaxedKeyword(query.getKeyword())));
+            }
+        }
+
         Map<String, String> categoryNames = categoryNames(categories);
         JSONArray items = new JSONArray();
         for (AiItemRow item : result.getRecords()) {
@@ -338,6 +352,17 @@ public class AiQueryService {
         card.put("pageSize", query.getPageSize());
         card.put("items", items);
         return card;
+    }
+
+    /** 泛称后缀剥离：「游戏装备」→「游戏」、「化妆品类」→「化妆品」，剥离后过短则返回原词 */
+    private String relaxedKeyword(String keyword) {
+        String relaxed = keyword.trim();
+        for (String suffix : new String[]{"装备", "相关", "东西", "物品", "用品", "类"}) {
+            while (relaxed.endsWith(suffix) && relaxed.length() - suffix.length() >= 2) {
+                relaxed = relaxed.substring(0, relaxed.length() - suffix.length());
+            }
+        }
+        return relaxed;
     }
 
     /** get_stats：聚合统计（总数/按状态/按分类/总价值），分类 id 映射为展示名 */
@@ -684,10 +709,11 @@ public class AiQueryService {
     }
 
     /**
-     * 单个分类名 → 物品分类值（三级）：
-     * ① 用户分类命中时 id/名称都收（历史数据两种都存）；
-     * ② 系统分类命中（id/名称，统一清单）→ 聚合该系统分类下该用户已实例化的用户分类值；
-     * ③ 最后对物品在用值做精确/包含匹配（兼容历史清单外分类）
+     * 单个分类名/泛称 → 物品分类值（三级，逐级放宽）：
+     * ① 用户分类命中（id/名称精确，或名称/备注与泛称双向包含——「游戏装备」→「游戏道具」、「身份证件」→备注含「身份证」）收 id/名称；
+     * ② 系统分类命中（精确或双向包含，备注参与）→ 聚合该系统分类下该用户已实例化的用户分类值；
+     * ③ 最后对物品在用值做精确/包含匹配（兼容历史清单外分类）。
+     * 包含匹配要求两侧 ≥2 字，防单字误命中
      */
     private void collectCategoryValues(String uid, String raw, List<AiCategoryRef> categories,
                                        Set<String> usedCategoryValues, Set<String> out) {
@@ -704,8 +730,23 @@ public class AiQueryService {
                 return;
             }
         }
+        for (AiCategoryRef c : categories) {
+            if (c.isUser() && fuzzyCategoryHit(name, c)) {
+                out.add(String.valueOf(c.getId()));
+                if (c.getName() != null) {
+                    out.add(c.getName());
+                }
+                return;
+            }
+        }
         for (AiCategoryRef s : categories) {
             if (!s.isUser() && (name.equals(String.valueOf(s.getId())) || name.equalsIgnoreCase(s.getName()))) {
+                out.addAll(taxonomyPort.categoryIdsBySystemName(uid, s.getName()));
+                return;
+            }
+        }
+        for (AiCategoryRef s : categories) {
+            if (!s.isUser() && fuzzyCategoryHit(name, s)) {
                 out.addAll(taxonomyPort.categoryIdsBySystemName(uid, s.getName()));
                 return;
             }
@@ -715,6 +756,27 @@ public class AiQueryService {
                 out.add(v);
             }
         }
+    }
+
+    /** 泛称 ↔ 分类名/备注 双向包含命中（两侧 ≥2 字）：「游戏装备」↔「游戏」「证件」↔备注「身份证/护照等」 */
+    private boolean fuzzyCategoryHit(String query, AiCategoryRef c) {
+        if (looseContains(query, c.getName())) {
+            return true;
+        }
+        return looseContains(query, c.getRemark());
+    }
+
+    /** 双向包含：a 包含 b 或 b 包含 a，且被包含侧 ≥2 字（防单字误命中） */
+    private boolean looseContains(String a, String b) {
+        if (StrUtil.isBlank(a) || StrUtil.isBlank(b)) {
+            return false;
+        }
+        String x = a.trim();
+        String y = b.trim();
+        if (y.length() < 2 || x.length() < 2) {
+            return false;
+        }
+        return x.contains(y) || y.contains(x);
     }
 
     /** 物品实际在用的分类值去重集合（含用户分类 id 与建档字典名），上限 40 防止提示词膨胀 */

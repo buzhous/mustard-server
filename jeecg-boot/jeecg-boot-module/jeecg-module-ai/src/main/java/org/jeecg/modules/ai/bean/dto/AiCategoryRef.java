@@ -29,4 +29,7 @@ public class AiCategoryRef implements Serializable {
 
     /** 系统分类对应的用户分类 id（已实例化时非空；用户分类恒等于 id） */
     private String userCategoryId;
+
+    /** 分类备注（系统分类 remark；由系统分类实例化的用户分类继承），供泛称/别名匹配 */
+    private String remark;
 }

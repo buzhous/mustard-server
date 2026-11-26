@@ -55,4 +55,26 @@ public class AiItemQuery implements Serializable {
     private Integer pageNo;
 
     private Integer pageSize;
+
+    public AiItemQuery() {
+    }
+
+    /** 拷贝构造：渐进放宽重试时基于原查询微调（丢 keyword/categoryList） */
+    public AiItemQuery(AiItemQuery other) {
+        this.userId = other.userId;
+        this.keyword = other.keyword;
+        this.categoryList = other.categoryList;
+        this.tag = other.tag;
+        this.level = other.level;
+        this.status = other.status;
+        this.priceMin = other.priceMin;
+        this.priceMax = other.priceMax;
+        this.createTimeStart = other.createTimeStart;
+        this.createTimeEnd = other.createTimeEnd;
+        this.stationIds = other.stationIds;
+        this.orderBy = other.orderBy;
+        this.ascending = other.ascending;
+        this.pageNo = other.pageNo;
+        this.pageSize = other.pageSize;
+    }
 }
