@@ -314,6 +314,20 @@ public class AiQueryService {
         query.setPageSize(pageSize == null ? MAX_PAGE_SIZE : pageSize);
 
         Page<AiItemRow> result = itemReadPort.listByCondition(query);
+        // keyword 转分类兜底：模型把泛称（如「证件」）当关键词且未给任何分类参数时，
+        // 首查 0 行则尝试将 keyword 按分类名/备注解析（复用三级放宽匹配），
+        // 命中分类后按分类重查物品，补齐「查询词命中分类维度」的召回路径
+        if (result.getTotal() == 0 && query.getKeyword() != null
+                && (query.getCategoryList() == null || query.getCategoryList().isEmpty())) {
+            JSONObject keywordAsCategory = new JSONObject();
+            keywordAsCategory.put("category", query.getKeyword());
+            Set<String> fallback = resolveCategoryValues(uid, keywordAsCategory, categories, usedCategoryValues);
+            if (!fallback.isEmpty()) {
+                result = itemReadPort.listByCondition(new AiItemQuery(query)
+                        .setKeyword(null)
+                        .setCategoryList(new ArrayList<>(fallback)));
+            }
+        }
         // 渐进放宽：keyword 与 categoryList 同时生效时 AND 语义易双空（如模型把泛称
         // 「证件」同时塞进 keyword 与 categories，物品名「身份证」不含「证件」）。
         // 全量 0 行时依次丢 keyword → 丢 categoryList 重试，最大化召回
