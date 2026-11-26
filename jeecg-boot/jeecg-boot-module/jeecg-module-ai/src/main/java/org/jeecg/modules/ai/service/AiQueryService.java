@@ -214,7 +214,7 @@ public class AiQueryService {
             case "get_stats" -> card = statsCard(uid, categories);
             case "get_item" -> card = getItemCard(uid, params, categories, stations);
             case "get_item_lineage" -> card = lineageCard(uid, params);
-            default -> card = searchCard(uid, categories, usedCategoryValues, params, stations);
+            default -> card = searchCard(uid, categories, usedCategoryValues, params, stations, text);
         }
         if (card == null) {
             // get_item 未命中（0/多件）→ 回退 search_items 关键词卡，避免空回复
@@ -222,7 +222,7 @@ public class AiQueryService {
                 JSONObject fallback = new JSONObject(true);
                 fallback.put("keyword", params.getString("itemName"));
                 fallback.put("category", params.getString("category"));
-                card = searchCard(uid, categories, usedCategoryValues, fallback, stations);
+                card = searchCard(uid, categories, usedCategoryValues, fallback, stations, text);
                 if (card != null) {
                     card.put("fallbackFrom", "get_item");
                 }
@@ -254,7 +254,7 @@ public class AiQueryService {
     /** search_items：keyword/category/categories/tag/level/status + v2 过滤器（价格/时间/仓位/排序）+ 分页，仅输出安全摘要字段 */
     private JSONObject searchCard(String uid, List<AiCategoryRef> categories,
                                   Set<String> usedCategoryValues, JSONObject params,
-                                  List<AiStationRef> stations) {
+                                  List<AiStationRef> stations, String userText) {
         AiItemQuery query = new AiItemQuery().setUserId(uid);
         if (params != null) {
             query.setKeyword(clipStr(params.getString("keyword"), MAX_KEYWORD));
@@ -314,6 +314,10 @@ public class AiQueryService {
         query.setPageSize(pageSize == null ? MAX_PAGE_SIZE : pageSize);
 
         Page<AiItemRow> result = itemReadPort.listByCondition(query);
+        log.info("[ai-query] search keyword={}, categoryList={}, firstTotal={}, usedCategoryValues={}, userCategories={}",
+                query.getKeyword(), query.getCategoryList(), result.getTotal(),
+                usedCategoryValues,
+                categories.stream().filter(AiCategoryRef::isUser).map(AiCategoryRef::getName).toList());
         // keyword 转分类兜底：模型把泛称（如「证件」）当关键词且未给任何分类参数时，
         // 首查 0 行则尝试将 keyword 按分类名/备注解析（复用三级放宽匹配），
         // 命中分类后按分类重查物品，补齐「查询词命中分类维度」的召回路径
@@ -322,10 +326,56 @@ public class AiQueryService {
             JSONObject keywordAsCategory = new JSONObject();
             keywordAsCategory.put("category", query.getKeyword());
             Set<String> fallback = resolveCategoryValues(uid, keywordAsCategory, categories, usedCategoryValues);
+            log.info("[ai-query] keyword-as-category fallback: keyword={}, resolved={}, usedValues={}",
+                    query.getKeyword(), fallback, usedCategoryValues);
             if (!fallback.isEmpty()) {
                 result = itemReadPort.listByCondition(new AiItemQuery(query)
                         .setKeyword(null)
                         .setCategoryList(new ArrayList<>(fallback)));
+                log.info("[ai-query] keyword-as-category retryTotal={}", result.getTotal());
+            }
+        }
+        // 分类漂移扩展：LLM 输出的近名分类（如「证件票据」）精确命中字典，但物品实际
+        // 挂在细粒度在用值（「身份证」「护照」等建档自由词）下，按分类 id/名称过滤必 0 行。
+        // 两级召回：①分类名/备注 ↔ 物品在用值双向包含（实例化分类继承系统分类 remark）
+        // ②remark 词表覆盖不到的自由词 → LLM 在用值挑选（白名单内）
+        if (result.getTotal() == 0 && query.getCategoryList() != null
+                && !query.getCategoryList().isEmpty()) {
+            Set<String> expanded = new LinkedHashSet<>(query.getCategoryList());
+            for (String v : query.getCategoryList()) {
+                expanded.addAll(expandRelatedCategories(v, categories));
+            }
+            for (String v : usedCategoryValues) {
+                for (String q : query.getCategoryList()) {
+                    if (looseContains(q, v)) {
+                        expanded.add(v);
+                    }
+                }
+            }
+            List<AiCategoryRef> matched = new ArrayList<>();
+            for (AiCategoryRef c : categories) {
+                if (c.isUser() && c.getName() != null
+                        && query.getCategoryList().contains(c.getName())) {
+                    matched.add(c);
+                }
+            }
+            for (String v : usedCategoryValues) {
+                for (AiCategoryRef c : matched) {
+                    if (looseContains(v, c.getName()) || looseContains(v, c.getRemark())) {
+                        expanded.add(v);
+                        break;
+                    }
+                }
+            }
+            // remark 词表只覆盖部分建档自由词（如含「身份证」但无「护照」「驾驶证」），
+            // LLM 挑值不受重查结果短路：总是执行并与 remark 匹配合并为一次重查
+            Set<String> picked = pickValuesByLlm(userText, query.getCategoryList(), usedCategoryValues);
+            log.info("[ai-query] llm-value-pick picked={}", picked);
+            expanded.addAll(picked);
+            if (expanded.size() > query.getCategoryList().size()) {
+                log.info("[ai-query] category-drift expand: {} -> {}", query.getCategoryList(), expanded);
+                result = itemReadPort.listByCondition(new AiItemQuery(query)
+                        .setCategoryList(new ArrayList<>(expanded)));
             }
         }
         // 渐进放宽：keyword 与 categoryList 同时生效时 AND 语义易双空（如模型把泛称
@@ -366,6 +416,66 @@ public class AiQueryService {
         card.put("pageSize", query.getPageSize());
         card.put("items", items);
         return card;
+    }
+
+    /**
+     * 分类漂移扩展：查询分类词与全部用户分类做双向包含匹配，
+     * 收集所有相似分类（不 return，区别于 collectCategoryValues 的单命中），
+     * 如「证件票据」→ 同时并入「证件」「票据」等，避免近名分类漂移漏召回
+     */
+    private Set<String> expandRelatedCategories(String raw, List<AiCategoryRef> categories) {
+        String name = StrUtil.trimToNull(raw);
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (name == null) {
+            return out;
+        }
+        for (AiCategoryRef c : categories) {
+            if (!c.isUser()) {
+                continue;
+            }
+            if (name.equals(c.getName()) || fuzzyCategoryHit(name, c)) {
+                out.add(String.valueOf(c.getId()));
+                if (c.getName() != null) {
+                    out.add(c.getName());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** LLM 在用值挑选 prompt：分类 0 行且 remark 词表未覆盖时，让模型从物品在用值清单挑相关值 */
+    private static final String VALUE_PICK_PROMPT = """
+            你是物品检索助手。用户按分类查询物品但没有命中，需要从该用户物品实际使用的分类值清单中挑选与查询相关的值。
+            用户查询原文：{{USER_TEXT}}
+            查询分类词：{{CATEGORY_WORDS}}
+            物品在用分类值清单（JSON 数组）：{{USED_VALUES}}
+            规则：只从清单中选择语义相关的值（如查询证件相关时选「身份证」「护照」等证件类值，查询数码相关时选「手机」「相机」等）；语义无关或不确定就不选；最多 10 个。
+            仅输出 JSON：{"values": ["值1","值2"]}，无关时输出 {"values": []}""";
+
+    /**
+     * LLM 在用值挑选：把物品在用值清单给模型选择与查询相关的值。
+     * 结果做白名单过滤（仅收清单内值，防注入越权），上限 10 个防卡片膨胀
+     */
+    private Set<String> pickValuesByLlm(String userText, List<String> categoryWords, Set<String> usedValues) {
+        if (StrUtil.isBlank(userText) || usedValues.isEmpty() || usedValues.size() > 80) {
+            return Set.of();
+        }
+        String prompt = VALUE_PICK_PROMPT
+                .replace("{{USER_TEXT}}", userText)
+                .replace("{{CATEGORY_WORDS}}", String.join("、", categoryWords))
+                .replace("{{USED_VALUES}}", JSON.toJSONString(usedValues));
+        JSONObject out = callStructured(prompt, userText);
+        JSONArray arr = out == null ? null : out.getJSONArray("values");
+        Set<String> picked = new LinkedHashSet<>();
+        if (arr != null) {
+            for (int i = 0; i < arr.size() && picked.size() < 10; i++) {
+                String v = arr.getString(i);
+                if (StrUtil.isNotBlank(v) && usedValues.contains(v.trim())) {
+                    picked.add(v.trim());
+                }
+            }
+        }
+        return picked;
     }
 
     /** 泛称后缀剥离：「游戏装备」→「游戏」、「化妆品类」→「化妆品」，剥离后过短则返回原词 */
