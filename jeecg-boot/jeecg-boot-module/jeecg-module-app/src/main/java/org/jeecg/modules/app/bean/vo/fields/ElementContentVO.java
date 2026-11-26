@@ -77,7 +77,7 @@ public class ElementContentVO implements Serializable {
     private String longitude;
 
     @Schema(description = "值")
-    private String value;
+    private Object value;
 
     @Schema(description = "排序")
     private Integer sort;
