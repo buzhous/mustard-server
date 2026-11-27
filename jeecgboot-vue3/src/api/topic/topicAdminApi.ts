@@ -8,6 +8,7 @@ enum Api {
   edit = '/topic/admin/edit',
   delete = '/topic/admin/delete',
   deleteBatch = '/topic/admin/deleteBatch',
+  sysCategoryList = '/manage/system/category/list',
 }
 
 /**
@@ -68,4 +69,23 @@ export const deleteBatch = (params, handleSuccess) => {
       });
     },
   });
+};
+
+/**
+ * 系统分类下拉选项（C3 分类治理，tbl_system_category）。
+ * 主题分类/物品分类下拉数据源；全量拉取后 ApiSelect 客户端搜索过滤。
+ * 停用分类置灰但保留（编辑存量主题时保住原值）
+ */
+export const getSystemCategoryOptions = () => {
+  return defHttp
+    .get(
+      { url: Api.sysCategoryList, params: { pageNo: 1, pageSize: 200 } },
+      { successMessageMode: 'none' }
+    )
+    .then((res: any) =>
+      ((res?.records ?? []) as any[]).map((r) => ({
+        ...r,
+        disabled: Number(r.status) !== 1,
+      }))
+    );
 };

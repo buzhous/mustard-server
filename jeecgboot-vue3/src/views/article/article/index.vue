@@ -23,48 +23,8 @@
       </template>
     </BasicTable>
 
-    <a-modal
-      v-model:open="editVisible"
-      :title="editForm.id ? '编辑文章' : '新增文章'"
-      width="860px"
-      :confirm-loading="editLoading"
-      ok-text="保存"
-      @ok="handleSave"
-    >
-      <a-form :label-col="{ span: 4 }" :wrapper-col="{ span: 19 }">
-        <a-form-item label="所属栏目" required>
-          <a-select v-model:value="editForm.columnId" placeholder="请选择所属栏目" :options="columnOptions" />
-        </a-form-item>
-        <a-form-item label="文章标题" required>
-          <a-input v-model:value="editForm.title" placeholder="请输入文章标题（100 字内）" :maxlength="100" />
-        </a-form-item>
-        <a-form-item label="文章编码">
-          <a-input
-            v-model:value="editForm.articleCode"
-            placeholder="唯一业务编码，App 按编码获取（如 user_agreement）"
-            :maxlength="50"
-          />
-        </a-form-item>
-        <a-form-item label="作者">
-          <a-input v-model:value="editForm.author" placeholder="请输入作者（选填）" :maxlength="50" />
-        </a-form-item>
-        <a-form-item label="排序">
-          <a-input-number v-model:value="editForm.sortNo" :min="0" :precision="0" style="width: 140px" />
-        </a-form-item>
-        <a-form-item label="状态">
-          <a-radio-group v-model:value="editForm.status">
-            <a-radio :value="1">发布</a-radio>
-            <a-radio :value="0">下架</a-radio>
-          </a-radio-group>
-        </a-form-item>
-        <a-form-item label="摘要">
-          <a-textarea v-model:value="editForm.summary" placeholder="摘要（选填，500 字内）" :rows="2" :maxlength="500" show-count />
-        </a-form-item>
-        <a-form-item label="文章内容" required>
-          <JEditor v-model:value="editForm.content" height="360px" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
+    <!-- 新增/编辑抽屉（复用栏目下拉与富文本编辑） -->
+    <ArticleDrawer @register="registerDrawer" @success="reload" />
 
     <a-modal v-model:open="previewVisible" :title="previewTitle" width="760px" :footer="null">
       <div class="article-preview" v-html="previewContent"></div>
@@ -73,15 +33,13 @@
 </template>
 
 <script lang="ts" name="article-admin" setup>
-  import { h, ref } from 'vue';
+  import { ref } from 'vue';
   import { BasicTable, TableAction } from '/@/components/Table';
+  import { useDrawer } from '/@/components/Drawer';
   import { useListPage } from '/@/hooks/system/useListPage';
-  import { useMessage } from '/@/hooks/web/useMessage';
-  import JEditor from '/@/components/Form/src/jeecg/components/JEditor.vue';
-  import { list, queryById, addArticle, editArticle, deleteArticle, deleteBatch, columnList } from '/@/api/article/articleAdminApi';
+  import { list, queryById, deleteArticle, deleteBatch } from '/@/api/article/articleAdminApi';
   import { columns, searchFormSchema } from './data';
-
-  const { createMessage } = useMessage();
+  import ArticleDrawer from './ArticleDrawer.vue';
 
   // 列表页面公共参数、方法
   const { tableContext } = useListPage({
@@ -92,6 +50,7 @@
       columns: columns,
       actionColumn: {
         width: 180,
+        fixed: 'right',
       },
       formConfig: {
         labelWidth: 90,
@@ -102,39 +61,12 @@
 
   const [registerTable, { reload }, { rowSelection, selectedRowKeys }] = tableContext;
 
-  const columnOptions = ref<{ label: string; value: string }[]>([]);
-  const editVisible = ref(false);
-  const editLoading = ref(false);
-  const editForm = ref<any>(getDefaultForm());
+  // 新增/编辑抽屉
+  const [registerDrawer, { openDrawer }] = useDrawer();
+
   const previewVisible = ref(false);
   const previewTitle = ref('');
   const previewContent = ref('');
-
-  function getDefaultForm() {
-    return {
-      id: '',
-      columnId: undefined,
-      articleCode: '',
-      title: '',
-      author: '',
-      sortNo: 0,
-      status: 1,
-      summary: '',
-      content: '',
-    };
-  }
-
-  /** 加载栏目下拉 */
-  async function loadColumns() {
-    try {
-      const res = await columnList();
-      const records = res?.result || [];
-      columnOptions.value = records.map((c) => ({ label: `${c.columnName}（${c.columnCode}）`, value: c.id }));
-    } catch (e) {
-      columnOptions.value = [];
-    }
-  }
-  loadColumns();
 
   /**
    * 操作列定义
@@ -161,61 +93,21 @@
   }
 
   function openAdd() {
-    editForm.value = getDefaultForm();
-    loadColumns();
-    editVisible.value = true;
+    openDrawer(true, { isUpdate: false });
   }
 
-  async function openEdit(record) {
-    loadColumns();
-    const res = await queryById({ id: record.id });
-    const detail = res?.result || record;
-    editForm.value = {
-      id: detail.id,
-      columnId: detail.columnId,
-      articleCode: detail.articleCode || '',
-      title: detail.title,
-      author: detail.author || '',
-      sortNo: detail.sortNo ?? 0,
-      status: detail.status ?? 1,
-      summary: detail.summary || '',
-      content: detail.content || '',
-    };
-    editVisible.value = true;
+  function openEdit(record) {
+    // 详情（含富文本内容）由抽屉内部拉取
+    openDrawer(true, { isUpdate: true, record });
   }
 
   function openPreview(record) {
     previewTitle.value = record.title;
-    // 列表不含正文，预览前拉取详情
+    // 列表不含正文，预览前拉取详情；返回值即详情对象
     queryById({ id: record.id }).then((res) => {
-      previewContent.value = res?.result?.content || '';
+      previewContent.value = res?.content || '';
       previewVisible.value = true;
     });
-  }
-
-  async function handleSave() {
-    const f = editForm.value;
-    if (!f.columnId) {
-      createMessage.warning('请选择所属栏目');
-      return;
-    }
-    if (!f.title?.trim()) {
-      createMessage.warning('请填写文章标题');
-      return;
-    }
-    if (!f.content?.trim()) {
-      createMessage.warning('请填写文章内容');
-      return;
-    }
-    editLoading.value = true;
-    try {
-      const res = f.id ? await editArticle(f) : await addArticle(f);
-      createMessage.success(res?.message || '保存成功');
-      editVisible.value = false;
-      reload();
-    } finally {
-      editLoading.value = false;
-    }
   }
 
   async function handleDelete(record) {

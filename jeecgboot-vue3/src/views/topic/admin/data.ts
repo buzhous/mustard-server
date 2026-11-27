@@ -1,6 +1,18 @@
 import { h } from 'vue';
 import { Tag } from 'ant-design-vue';
 import { BasicColumn, FormSchema } from '/@/components/Table';
+import { getSystemCategoryOptions } from '/@/api/topic/topicAdminApi';
+
+/** 系统分类下拉搜索过滤：分类名称 / 边界说明 remark / id 任一命中 */
+export function filterCateOption(input: string, option: Recordable) {
+  const key = String(input ?? '').trim().toLowerCase();
+  if (!key) return true;
+  return (
+    String(option?.label ?? '').toLowerCase().includes(key) ||
+    String(option?.remark ?? '').toLowerCase().includes(key) ||
+    String(option?.value ?? '').includes(key)
+  );
+}
 
 /** 主题类型文案（与后端 TopicFieldClassifier 推导规则一致） */
 export const TOPIC_TYPE_OPTIONS = [
@@ -138,8 +150,31 @@ export const formSchema: FormSchema[] = [
   {
     field: 'topicCate',
     label: '主题分类',
-    component: 'Input',
-    helpMessage: '可选，主题业务分类标识',
+    component: 'ApiSelect',
+    required: true,
+    helpMessage: '采用系统分类（C3 分类治理），支持名称/说明/ID 搜索过滤；停用分类置灰',
+    componentProps: {
+      api: getSystemCategoryOptions,
+      labelField: 'name',
+      valueField: 'id',
+      placeholder: '输入分类名称/说明搜索系统分类',
+      allowClear: true,
+      filterOption: filterCateOption,
+    },
+  },
+  {
+    field: 'itemCate',
+    label: '物品分类',
+    component: 'ApiSelect',
+    helpMessage: 'App 建档默认分类（系统分类，如证件主题→证件票据）；为空时 App 按主题默认规则落定',
+    componentProps: {
+      api: getSystemCategoryOptions,
+      labelField: 'name',
+      valueField: 'id',
+      placeholder: '输入分类名称/说明搜索系统分类',
+      allowClear: true,
+      filterOption: filterCateOption,
+    },
   },
   {
     field: 'isHot',
