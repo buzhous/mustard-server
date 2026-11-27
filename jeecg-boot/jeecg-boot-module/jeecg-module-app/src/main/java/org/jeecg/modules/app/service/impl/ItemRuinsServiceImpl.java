@@ -157,6 +157,7 @@ public class ItemRuinsServiceImpl extends ServiceImpl<ItemRuinsMapper, ItemRuins
         // MIP 流转账本：殷墟拾取（custody 交接，幂等键=殷墟记录，重试零重复）
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(ruins.getOriId())
+                .setItemId(itemSync.getItemId())
                 .setEventType(MipEventType.RUINS_PICK.getCode())
                 .setFromUid(LineageService.hashUid(ruins.getUserId()))
                 .setToUid(LineageService.hashUid(userId))

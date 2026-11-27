@@ -114,6 +114,7 @@ public class AppMipAdminController {
                 }
                 lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                         .setOriId(item.getOriId())
+                        .setItemId(String.valueOf(item.getId()))
                         .setEventType(org.jeecg.modules.app.mip.MipEventType.IMPORT.getCode())
                         .setToUid(org.jeecg.modules.app.mip.LineageService.hashUid(item.getUserId()))
                         .setOperator(org.jeecg.modules.app.mip.LineageService.OPERATOR_SYSTEM)

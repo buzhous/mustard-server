@@ -122,7 +122,9 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
         itemGift.setSenderUserId(userId);
         itemGift.setReceiverUserId(reqVO.getReceiverUserId());
         itemGift.setItemId(reqVO.getItemId());
-        itemGift.setOriId(reqVO.getOriId());
+        // oriId 服务端派生（不再信任入参）：itemId → tbl_item_sync 权威 oriId
+        org.jeecg.modules.app.entity.ItemSync giftSync = itemSyncService.getItemSyncByItemId(reqVO.getItemId());
+        itemGift.setOriId(giftSync == null ? null : giftSync.getOriId());
         itemGift.setInventoryId(inventory.getId());
         itemGift.setTotalQuantity(reqVO.getQuantity());
         itemGift.setReceivedQuantity(0);
@@ -156,6 +158,7 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
         // MIP 流转账本：赠送发出（custody 挪出到托管；幂等键=赠送单）
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(itemGift.getOriId())
+                .setItemId(itemGift.getItemId())
                 .setEventType(MipEventType.GIFT_OUT.getCode())
                 .setFromUid(LineageService.hashUid(userId))
                 .setToUid(GiftTypeEnum.DIRECT.getCode() == itemGift.getGiftType()
@@ -303,6 +306,7 @@ public class ItemGiftServiceImpl extends ServiceImpl<ItemGiftMapper, ItemGift> i
         saveGiftReceiveRecord(itemGift.getId(), userId, receiveQuantity);
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(itemGift.getOriId())
+                .setItemId(itemGift.getItemId())
                 .setEventType(MipEventType.GIFT_IN.getCode())
                 .setFromUid(LineageService.hashUid(itemGift.getSenderUserId()))
                 .setToUid(LineageService.hashUid(userId))

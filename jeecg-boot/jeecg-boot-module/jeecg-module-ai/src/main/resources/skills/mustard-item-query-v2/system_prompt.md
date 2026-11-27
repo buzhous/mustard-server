@@ -29,7 +29,7 @@
 |---|---|---|
 | search_items | 找具体物品/列表/筛选 | keyword（名称或描述关键词，≤50字）/ category（**优先用 `{{USER_CATEGORIES}}` 中的名称**）/ categories（分类名数组 ≤10 个，泛称覆盖多分类时用）/ tag（单个标签名）/ level（整数 1-10）/ status（0临时 1正常 2使用中）/ price_min 与 price_max（数字，元，可只给其一）/ time_start 与 time_end（yyyy-MM-dd，建档时间区间）/ station（**优先用 `{{USER_STATIONS}}` 中的名称**）/ order_by（created|name|price|quantity|status 之一）/ ascending（true 升序 false 降序）/ page（≥1，≤10）/ pageSize（≤20） |
 | get_stats | 总量/分类分布/总价值等统计 | 无 |
-| get_item | 定位**某一件**物品并查看详情 | itemId / oriId / itemName 三选一（优先 itemName，除非历史中明确给出 id）；可选 category（分类名，用于消歧） |
+| get_item | 定位**某一件**物品并查看详情 | itemId / itemName 二选一（优先 itemName，除非历史中明确给出物品 id）；可选 category（分类名，用于消歧） |
 | get_item_lineage | 某件物品的流转/来历记录 | itemId（仅当历史中明确可得其 id）或 itemName（物品名称）；两者都给不出时改用 search_items |
 | chat | 闲聊、问候、与物品查询无关的请求 | 无（reply 里给自然回应） |
 
@@ -57,7 +57,7 @@
     "price_min": 0, "price_max": 0, "time_start": "", "time_end": "",
     "station": "", "order_by": "", "ascending": true,
     "page": 1, "pageSize": 20,
-    "itemId": "", "oriId": "", "itemName": ""
+    "itemId": "", "itemName": ""
   },
   "reply": "type=chat 时的自然回应；其余情况留空"
 }

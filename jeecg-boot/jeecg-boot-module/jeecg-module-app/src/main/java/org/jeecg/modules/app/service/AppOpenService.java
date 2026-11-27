@@ -63,6 +63,8 @@ public class AppOpenService {
     private static final String KEY_GIFT_TOKEN = "open:gift:";
     private static final long GIFT_TOKEN_TTL_SECONDS = 300;
     private static final long IDEM_TTL_SECONDS = 86400;
+    /** AI 专属凭据标记（与 AiItemPortImpl.AI_CREDENTIAL_MARK 一致）：建档来源标记 ai 的判定依据 */
+    private static final String AI_CREDENTIAL_MARK = "ai_assistant";
 
     @Autowired
     private IItemInfoService itemInfoService;
@@ -83,9 +85,24 @@ public class AppOpenService {
     private LineageService lineageService;
 
     @Autowired
+    private org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService;
+
+    @Autowired
     private RedisUtil redisUtil;
 
     // ================================ 只读内核 ================================
+
+    /**
+     * 建档 operator：AI 专属凭据（remark 含 ai_assistant）传纯 "agent"（source=ai），
+     * 其余开放平台凭据传 "agent:{appKey尾4位}"（source=mcp）
+     */
+    private String resolveCreateOperator(OpenAppCredential credential) {
+        String remark = credential == null ? null : credential.getRemark();
+        if (remark != null && remark.contains(AI_CREDENTIAL_MARK)) {
+            return "agent";
+        }
+        return LineageService.operatorAgent(credential == null ? null : credential.getAppKey());
+    }
 
     /**
      * 物品分页查询（红线过滤 + 出域摘要装配：schemaId/contentHash）
@@ -282,9 +299,8 @@ public class AppOpenService {
             fail.setResult(errorBody);
             return fail;
         }
-        // 入库（oriId 由服务端生成；未传仓位自动落默认仓）
-        String oriId = StrUtil.blankToDefault(body.getString("oriId"),
-                IdUtil.fastSimpleUUID());
+        // 入库：oriId 服务端生成（客户端传入一律忽略，防伪造/跨用户碰撞）
+        String oriId = IdUtil.fastSimpleUUID();
         ItemInfoCreateVO createVO = new ItemInfoCreateVO()
                 .setOriId(oriId)
                 .setUserId(credential.getBoundUid())
@@ -295,7 +311,7 @@ public class AppOpenService {
                 .setQuantity(quantity)
                 .setStatus(confidence >= CONFIDENCE_THRESHOLD ? 1 : 0)
                 .setFields(JSON.parseArray(fieldsJson, FieldElementVO.class));
-        boolean saved = itemInfoService.createItemInfo(createVO, LineageService.operatorAgent(credential.getAppKey()));
+        boolean saved = itemInfoService.createItemInfo(createVO, resolveCreateOperator(credential));
         if (!saved) {
             return Result.error(500, "物品入库失败");
         }
@@ -310,6 +326,9 @@ public class AppOpenService {
                 inventoryVO.getId() == null ? null : String.valueOf(inventoryVO.getId()),
                 sync.category(), sync.name(), sync.icon(), sync.level(), quantity,
                 confidence >= CONFIDENCE_THRESHOLD ? 1 : 0, fieldsJson);
+        // 检索索引快照 UPSERT（P2-3）：须在同步行落库后触发——rebuild 判无有效同步行会删索引行，
+        // createItemInfo 内的钩子在同步行创建前执行，此处为建档链路真正生效的索引写入点
+        searchIndexService.rebuild(createVO.getItemId());
         // 返回 MIP 出域实例 + 入库状态（normal/draft）
         ItemInfo created = itemInfoService.queryItemInfo(createVO.getItemId());
         JSONObject instance = buildOutboundInstance(created, credential.getBoundUid(), true);
@@ -406,23 +425,34 @@ public class AppOpenService {
             replayResult.setResult(cached.getJSONObject("result"));
             return replayResult;
         }
-        // attributes → fields（与 addItem 同规则）
-        JSONArray fields = new JSONArray();
-        int sort = 0;
-        for (int i = 0; i < attributes.size(); i++) {
-            JSONObject attr = attributes.getJSONObject(i);
-            Integer element = attr == null ? null : attr.getInteger("element");
-            if (element == null || !MipComponentRegistry.isKnown(element)) {
-                return Result.error(400, "element " + element + " 非法组件");
+        // patch 合并模式（P5 AI 编辑）：attributes 为局部补丁——读存量 fields 按 element
+        // 替换/追加（存量 restricted 原值保留，patch 中 restricted 元素丢弃兜底）；
+        // 不传 patch 时保持全量覆盖语义，开放平台 update_item 契约不变
+        JSONArray fields;
+        if (Boolean.TRUE.equals(body.getBoolean("patch"))) {
+            fields = mergePatchFields(exists, attributes);
+            if (fields == null) {
+                return Result.error(400, "patch 无可执行字段");
             }
-            MipComponentRegistry.Component def = MipComponentRegistry.get(element);
-            JSONObject f = new JSONObject(true);
-            f.put("element", element);
-            f.put("name", def == null ? String.valueOf(element) : def.name());
-            f.put("sort", ++sort);
-            f.put("isShow", 1);
-            f.put("content", contentFor(element, attr.get("value")));
-            fields.add(f);
+        } else {
+            // attributes → fields（与 addItem 同规则）
+            fields = new JSONArray();
+            int sort = 0;
+            for (int i = 0; i < attributes.size(); i++) {
+                JSONObject attr = attributes.getJSONObject(i);
+                Integer element = attr == null ? null : attr.getInteger("element");
+                if (element == null || !MipComponentRegistry.isKnown(element)) {
+                    return Result.error(400, "element " + element + " 非法组件");
+                }
+                MipComponentRegistry.Component def = MipComponentRegistry.get(element);
+                JSONObject f = new JSONObject(true);
+                f.put("element", element);
+                f.put("name", def == null ? String.valueOf(element) : def.name());
+                f.put("sort", ++sort);
+                f.put("isShow", 1);
+                f.put("content", contentFor(element, attr.get("value")));
+                fields.add(f);
+            }
         }
         // 流转锁复核：锁定期拒编辑（D1 定向流转）
         if (itemFlowService.locked(String.valueOf(exists.getId()))) {
@@ -465,6 +495,8 @@ public class AppOpenService {
         if (!ok) {
             return Result.error(500, "物品更新失败");
         }
+        // 检索索引快照 UPSERT（同事务，失败不阻断）
+        searchIndexService.rebuild(exists.getId());
         // 回写同步队列表（编辑同样补写/升版，保证 App 增量可见）
         org.jeecg.modules.app.entity.ItemUserInventory openInv = itemUserInventoryService
                 .queryUserItem(credential.getBoundUid(), String.valueOf(exists.getId()));
@@ -477,6 +509,7 @@ public class AppOpenService {
         // 账本：update（自持事件，from=to=当前用户）
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(exists.getOriId())
+                .setItemId(String.valueOf(exists.getId()))
                 .setEventType(MipEventType.UPDATE.getCode())
                 .setFromUid(LineageService.hashUid(credential.getBoundUid()))
                 .setToUid(LineageService.hashUid(credential.getBoundUid()))
@@ -488,6 +521,65 @@ public class AppOpenService {
         result.setMessage("updated");
         redisUtil.set(idemKey, JSON.toJSONString(result), IDEM_TTL_SECONDS);
         return result;
+    }
+
+    /**
+     * patch 合并（P5 AI 编辑专用，body.patch=true 时生效）：存量 fields 按 element 局部替换/追加。
+     * 数据安全硬约束：存量 restricted 字段原值保留（AI 侧经出域过滤拿不到敏感原值，
+     * 全量覆盖会清空用户手动补录数据，故 patch 模式只动 patch 提到的 element）；
+     * patch 中 restricted / 未知 element 一律丢弃（写路径第三重防线兜底）。
+     *
+     * @return 合并后 fields；无可执行 patch 字段时返回 null
+     */
+    private JSONArray mergePatchFields(ItemInfo exists, JSONArray patchAttrs) {
+        java.util.LinkedHashMap<Integer, Object> patchValues = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < (patchAttrs == null ? 0 : patchAttrs.size()); i++) {
+            JSONObject attr = patchAttrs.getJSONObject(i);
+            Integer element = attr == null ? null : attr.getInteger("element");
+            if (element == null || !MipComponentRegistry.isKnown(element)
+                    || MipComponentRegistry.LOCKED_RESTRICTED.contains(element)
+                    || attr.get("value") == null) {
+                continue;
+            }
+            patchValues.put(element, attr.get("value"));
+        }
+        if (patchValues.isEmpty()) {
+            return null;
+        }
+        JSONArray fields = new JSONArray();
+        int sort = 0;
+        if (StrUtil.isNotBlank(exists.getFields())) {
+            try {
+                JSONArray existing = JSON.parseArray(exists.getFields());
+                for (int i = 0; i < existing.size(); i++) {
+                    JSONObject f = existing.getJSONObject(i);
+                    if (f == null) {
+                        continue;
+                    }
+                    Integer el = f.getInteger("element");
+                    if (el != null && patchValues.containsKey(el)) {
+                        f.put("content", contentFor(el, patchValues.remove(el)));
+                    }
+                    f.put("sort", ++sort);
+                    fields.add(f);
+                }
+            } catch (Exception e) {
+                log.warn("[open] patch 合并读存量 fields 失败 itemId={}，存量忽略按追加处理: {}",
+                        exists.getId(), e.getMessage());
+            }
+        }
+        for (java.util.Map.Entry<Integer, Object> en : patchValues.entrySet()) {
+            Integer el = en.getKey();
+            MipComponentRegistry.Component def = MipComponentRegistry.get(el);
+            JSONObject f = new JSONObject(true);
+            f.put("element", el);
+            f.put("name", def == null ? String.valueOf(el) : def.name());
+            f.put("sort", ++sort);
+            f.put("isShow", 1);
+            f.put("content", contentFor(el, en.getValue()));
+            fields.add(f);
+        }
+        return fields;
     }
 
     /**
@@ -529,9 +621,12 @@ public class AppOpenService {
         if (!ok) {
             return Result.error(500, "物品删除失败");
         }
+        // 检索索引同步删除（rebuild 检测物品行缺失即删索引行）
+        searchIndexService.rebuild(exists.getId());
         // 账本：recycle（账本终止语义，事件历史保留）
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(exists.getOriId())
+                .setItemId(String.valueOf(exists.getId()))
                 .setEventType(MipEventType.RECYCLE.getCode())
                 .setFromUid(LineageService.hashUid(credential.getBoundUid()))
                 .setOperator(LineageService.operatorAgent(credential.getAppKey()))
@@ -612,7 +707,6 @@ public class AppOpenService {
                 .setGiftType(1)
                 .setReceiverUserId(toUserId)
                 .setItemId(payload.getString("itemId"))
-                .setOriId(payload.getString("oriId"))
                 .setQuantity(payload.getInteger("quantity"))
                 .setRemark("开放平台赠送（" + LineageService.operatorAgent(credential.getAppKey()) + "）");
         ItemGiftRspVO rsp = itemGiftService.createGift(reqVO, credential.getBoundUid(),

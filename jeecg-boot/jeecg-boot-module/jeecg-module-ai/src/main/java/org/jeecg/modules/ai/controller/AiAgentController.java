@@ -41,13 +41,16 @@ public class AiAgentController {
     private final AiAuthPort authPort;
     private final AiRateLimiter rateLimiter;
     private final AiStreamService aiStreamService;
+    private final org.jeecg.modules.ai.service.AiUpdateService updateService;
 
     public AiAgentController(AiAgentService agentService, AiAuthPort authPort,
-                             AiRateLimiter rateLimiter, AiStreamService aiStreamService) {
+                             AiRateLimiter rateLimiter, AiStreamService aiStreamService,
+                             org.jeecg.modules.ai.service.AiUpdateService updateService) {
         this.agentService = agentService;
         this.authPort = authPort;
         this.rateLimiter = rateLimiter;
         this.aiStreamService = aiStreamService;
+        this.updateService = updateService;
     }
 
     @Operation(summary = "发送消息（解析→草稿/追问/闲聊）")
@@ -119,5 +122,20 @@ public class AiAgentController {
                 : draftParam instanceof String ? (String) draftParam : JSON.toJSONString(draftParam);
         return Result.OK(agentService.confirmCreate(uid,
                 body.getString("sessionId"), body.getInteger("quantity"), draftJson));
+    }
+
+    @Operation(summary = "确认更新（P5 update 意图：按更新对照卡执行编辑）")
+    @PostMapping("/update")
+    public Result<AiChatSendVO> update(@RequestBody JSONObject body) {
+        String uid = authPort.currentUid();
+        if (ObjectUtil.isEmpty(uid)) {
+            return Result.error(AiErrorEnum.USER_INFO_NOT_EXIST.getMsg());
+        }
+        if (body == null || ObjectUtil.isEmpty(body.getString("sessionId"))
+                || ObjectUtil.isEmpty(body.getString("messageId"))) {
+            return Result.error(AiErrorEnum.REQUEST_PARAM_ERROR.getMsg());
+        }
+        return Result.OK(updateService.confirmUpdate(uid,
+                body.getString("sessionId"), body.getString("messageId")));
     }
 }

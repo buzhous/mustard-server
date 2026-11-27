@@ -41,15 +41,22 @@ public class AiItemPortImpl implements ItemWritePort, ItemReadPort {
     private final IItemInfoService itemInfoService;
     private final IItemSyncService itemSyncService;
     private final OpenAppCredentialServiceImpl credentialService;
+    private final org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService;
+    /** 查询意图缓存（P4）：物品写路径成功后按 uid 批量失效 */
+    private final org.jeecg.modules.ai.service.AiQueryCacheService queryCacheService;
 
     public AiItemPortImpl(AppOpenService appOpenService,
                           IItemInfoService itemInfoService,
                           IItemSyncService itemSyncService,
-                          OpenAppCredentialServiceImpl credentialService) {
+                          OpenAppCredentialServiceImpl credentialService,
+                          org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService,
+                          org.jeecg.modules.ai.service.AiQueryCacheService queryCacheService) {
         this.appOpenService = appOpenService;
         this.itemInfoService = itemInfoService;
         this.itemSyncService = itemSyncService;
         this.credentialService = credentialService;
+        this.searchIndexService = searchIndexService;
+        this.queryCacheService = queryCacheService;
     }
 
     // ================================ ItemWritePort ================================
@@ -57,7 +64,29 @@ public class AiItemPortImpl implements ItemWritePort, ItemReadPort {
     @Override
     public Result<JSONObject> addItem(String uid, JSONObject body) {
         OpenAppCredential credential = resolveCredential(uid);
-        return appOpenService.addItem(credential, body, IdUtil.fastSimpleUUID());
+        Result<JSONObject> result = appOpenService.addItem(credential, body, IdUtil.fastSimpleUUID());
+        // 意图缓存写失效（P4）：创建成功即失效该 uid 全部查询缓存，异常吞掉不影响写主流程
+        if (result != null && result.isSuccess()) {
+            queryCacheService.evictUid(uid);
+        }
+        return result;
+    }
+
+    @Override
+    public Result<JSONObject> updateItem(String uid, String itemId, JSONObject body) {
+        OpenAppCredential credential = resolveCredential(uid);
+        if (body == null) {
+            body = new JSONObject();
+        }
+        // AI 局部补丁语义（P5）：服务端读存量 fields 合并，restricted 原值保留 + patch restricted 丢弃
+        body.put("itemId", itemId);
+        body.put("patch", true);
+        Result<JSONObject> result = appOpenService.updateItem(credential, body, IdUtil.fastSimpleUUID());
+        // 意图缓存写失效：更新成功同样失效该 uid 全部查询缓存
+        if (result != null && result.isSuccess()) {
+            queryCacheService.evictUid(uid);
+        }
+        return result;
     }
 
     /**
@@ -136,6 +165,48 @@ public class AiItemPortImpl implements ItemWritePort, ItemReadPort {
                 .setPageNo(query.getPageNo())
                 .setPageSize(query.getPageSize());
         Page<ItemInfo> page = itemInfoService.listByCondition(queryVO);
+        return toPage(page);
+    }
+
+    @Override
+    public List<String> aliasExpand(String term) {
+        return searchIndexService.aliasExpand(term);
+    }
+
+    @Override
+    public Page<AiItemRow> searchIndexQuery(String uid, List<String> terms, AiItemQuery filter) {
+        List<String> clean = terms == null ? List.of()
+                : terms.stream().filter(s -> s != null && !s.isBlank()).toList();
+        if (clean.isEmpty()) {
+            return new Page<>(filter.getPageNo() == null ? 1 : filter.getPageNo(),
+                    filter.getPageSize() == null ? 20 : filter.getPageSize(), 0);
+        }
+        // 全文索引圈定主键（任一词命中），其余过滤条件复用 listByCondition 同一套逻辑
+        List<String> ids = searchIndexService.searchIdsByTerms(uid, String.join(" ", clean));
+        if (ids.isEmpty()) {
+            return new Page<>(filter.getPageNo() == null ? 1 : filter.getPageNo(),
+                    filter.getPageSize() == null ? 20 : filter.getPageSize(), 0);
+        }
+        ItemInfoQueryVO queryVO = new ItemInfoQueryVO()
+                .setUserId(uid)
+                .setIdList(ids)
+                .setCategoryList(filter.getCategoryList())
+                .setTag(filter.getTag())
+                .setLevel(filter.getLevel())
+                .setStatus(filter.getStatus())
+                .setPriceMin(filter.getPriceMin())
+                .setPriceMax(filter.getPriceMax())
+                .setCreateTimeStart(filter.getCreateTimeStart())
+                .setCreateTimeEnd(filter.getCreateTimeEnd())
+                .setStationIds(filter.getStationIds())
+                .setOrderBy(filter.getOrderBy())
+                .setAscending(filter.getAscending())
+                .setPageNo(filter.getPageNo())
+                .setPageSize(filter.getPageSize());
+        return toPage(itemInfoService.listByCondition(queryVO));
+    }
+
+    private Page<AiItemRow> toPage(Page<ItemInfo> page) {
         Page<AiItemRow> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         List<AiItemRow> rows = new ArrayList<>(page.getRecords().size());
         for (ItemInfo item : page.getRecords()) {
@@ -146,10 +217,10 @@ public class AiItemPortImpl implements ItemWritePort, ItemReadPort {
     }
 
     @Override
-    public AiItemRow queryByOriId(String uid, String oriId) {
-        ItemInfo item = itemInfoService.queryItemInfoByOriId(uid, oriId);
-        // 回收站/已销毁物品不参与检索：oriId 直查同样排除
-        if (item == null || !isItemAlive(uid, String.valueOf(item.getId()))) {
+    public AiItemRow queryByItemId(String uid, String itemId) {
+        ItemInfo item = itemInfoService.queryItemInfo(itemId);
+        // 回收站/已销毁物品不参与检索：itemId 直查同样排除
+        if (item == null || !uid.equals(item.getUserId()) || !isItemAlive(uid, String.valueOf(item.getId()))) {
             return null;
         }
         return toRow(item);

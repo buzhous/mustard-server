@@ -4,6 +4,8 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.modules.ai.bean.enums.AiErrorEnum;
+import org.jeecg.modules.ai.bean.exception.AppException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -41,12 +43,39 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
     @Value("${jeecg.ai-chat.item-filing.thinking:disabled}")
     private String thinking;
 
+    /** L3 llm 槽位最大并发数（配置 ai.semaphore.llm-max，默认 800） */
+    @Value("${ai.semaphore.llm-max:800}")
+    private int llmMax;
+
+    /** L3 llm 槽位等待上限（毫秒）：超时抛 QUEUE_TIMEOUT */
+    private static final long LLM_WAIT_MS = 3000;
+
+    private final AiGlobalSemaphore semaphore;
+    /** 调优配置读路径（P4：DB enabled 模型参数优先于 yml @Value 默认，异常降级默认） */
+    private final org.jeecg.modules.ai.config.TuningConfigService tuningConfigService;
+
+    public OpenAiCompatAdapter(AiGlobalSemaphore semaphore,
+                               org.jeecg.modules.ai.config.TuningConfigService tuningConfigService) {
+        this.semaphore = semaphore;
+        this.tuningConfigService = tuningConfigService;
+    }
+
+    /** yml 内置默认模型名（admin 调优页展示「当前生效值+来源」用） */
+    public String defaultChatModel() {
+        return chatModel;
+    }
+
+    /** yml 内置默认温度（admin 调优页展示用） */
+    public double defaultTemperature() {
+        return temperature == null ? 0 : temperature;
+    }
+
     @Override
     public String structured(String systemPrompt, String userContent) {
         JSONObject body = baseBody(systemPrompt, userContent);
         // JSON 模式（DeepSeek/主流兼容端点支持），失败重试由编排器负责
         body.put("response_format", new JSONObject(true).fluentPut("type", "json_object"));
-        return post(body);
+        return guardedPost(body);
     }
 
     @Override
@@ -57,7 +86,7 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
         }
         JSONObject body = baseBody(null, null);
         body.put("messages", msgs);
-        return post(body);
+        return guardedPost(body);
     }
 
     @Override
@@ -88,10 +117,27 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
         msgs.add(new JSONObject(true).fluentPut("role", "user").fluentPut("content", content));
         JSONObject body = baseBody(null, null);
         body.put("messages", msgs);
-        return post(body);
+        return guardedPost(body);
     }
 
     // ================================ 私有工具 ================================
+
+    /**
+     * L3 模型调用（P2-8）：单请求调用计数（超 20 次抛 11002 AI 服务繁忙）→ llm 槽位获取
+     * （≤3s 未得抛 QUEUE_TIMEOUT）→ 调用 → finally 释放槽位。structured/chat/vision 全部覆盖。
+     */
+    private String guardedPost(JSONObject body) {
+        semaphore.countModelCall();
+        boolean acquired = semaphore.tryAcquire(AiGlobalSemaphore.SEM_LLM, llmMax, LLM_WAIT_MS);
+        if (!acquired) {
+            throw new AppException(AiErrorEnum.QUEUE_TIMEOUT);
+        }
+        try {
+            return post(body);
+        } finally {
+            semaphore.release(AiGlobalSemaphore.SEM_LLM);
+        }
+    }
 
     private JSONObject baseBody(String systemPrompt, String userContent) {
         JSONArray msgs = new JSONArray();
@@ -102,13 +148,17 @@ public class OpenAiCompatAdapter implements AiModelAdapter {
             msgs.add(new JSONObject(true).fluentPut("role", "user").fluentPut("content", userContent));
         }
         JSONObject body = new JSONObject(true);
-        body.put("model", chatModel);
+        // P4：模型名/温度经调优配置下发（model.chat_model / model.temperature），未配置走 yml 默认
+        body.put("model", tuningConfigService.strOpt(
+                org.jeecg.modules.ai.config.TuningConfigService.KEY_MODEL_CHAT_MODEL, chatModel));
         body.put("messages", msgs);
         // DeepSeek 新增参数：思考模式开关（官方默认 enabled；思考模式下 temperature 不生效，建档需确定性输出 → 默认 disabled）
         if (thinking != null && !thinking.isBlank()) {
             body.put("thinking", new JSONObject(true).fluentPut("type", thinking.trim()));
         }
-        body.put("temperature", temperature == null ? 0 : temperature);
+        body.put("temperature", tuningConfigService.numOpt(
+                org.jeecg.modules.ai.config.TuningConfigService.KEY_MODEL_TEMPERATURE,
+                temperature == null ? 0 : temperature));
         body.put("max_tokens", maxTokens == null ? 8192 : maxTokens);
         body.put("stream", false);
         return body;

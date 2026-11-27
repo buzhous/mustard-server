@@ -28,9 +28,11 @@ import org.jeecg.modules.app.service.IItemInfoService;
 import org.jeecg.modules.app.service.IUserStationBindService;
 import org.jeecg.modules.app.service.IUserStorageService;
 import org.jeecg.modules.app.service.IUserVirtualStationService;
+import org.jeecg.modules.app.service.ItemSearchIndexService;
 import org.jeecg.modules.app.utils.FieldElementUtil;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 
@@ -41,20 +43,39 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
     private final IUserVirtualStationService userVirtualStationService;
     private final IUserStorageService userStorageService;
     private final LineageService lineageService;
+    private final ItemSearchIndexService searchIndexService;
 
     public ItemInfoServiceImpl(IUserStationBindService userStationBindService,
                                IUserVirtualStationService userVirtualStationService,
                                IUserStorageService userStorageService,
                                LineageService lineageService,
-                               StatsEventService statsEventService) {
+                               StatsEventService statsEventService,
+                               ItemSearchIndexService searchIndexService) {
         this.userStationBindService = userStationBindService;
         this.userVirtualStationService = userVirtualStationService;
         this.userStorageService = userStorageService;
         this.lineageService = lineageService;
         this.statsEventService = statsEventService;
+        this.searchIndexService = searchIndexService;
     }
 
     private StatsEventService statsEventService;
+
+    /**
+     * 建档来源映射：operator "agent"（AI 建档）→ ai；"agent:{appKey尾4位}"（开放平台 MCP）→ mcp；其余 manual
+     */
+    private String resolveSource(String operator) {
+        if (operator == null || operator.isBlank()) {
+            return "manual";
+        }
+        if ("agent".equals(operator)) {
+            return "ai";
+        }
+        if (operator.startsWith(LineageService.OPERATOR_AGENT_PREFIX)) {
+            return "mcp";
+        }
+        return "manual";
+    }
 
     /**
      * 物品落仓：
@@ -153,12 +174,17 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         item.setFields(MipWriteSupport.enrich(item.getFields()));
         // 物品落仓：未指定仓位时自动落入用户默认仓位（优先主站点，其次虚拟仓）
         this.fillDefaultStation(createVO, item);
+        // 建档来源标记：operator→source 映射（agent→ai / agent:*→mcp / 其余 manual）
+        item.setSource(resolveSource(operator));
         // 创建物品信息
         boolean result = this.saveOrUpdate(item);
         if (result) {
+            // 检索索引快照 UPSERT（同事务，失败不阻断）
+            searchIndexService.rebuild(item.getId());
             // MIP 流转账本：建档 mint（链首事件，幂等键含 itemId 防重复建档污染）
             lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                     .setOriId(createVO.getOriId())
+                    .setItemId(String.valueOf(item.getId()))
                     .setEventType(MipEventType.MINT.getCode())
                     .setToUid(LineageService.hashUid(createVO.getUserId()))
                     .setOperator(operator)
@@ -222,6 +248,8 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         }
         // 更新物品信息
         boolean result = this.updateById(itemInfo);
+        // 检索索引快照 UPSERT（同事务，失败不阻断）
+        searchIndexService.rebuild(itemInfo.getId());
         createVO.setItemId(String.valueOf(itemInfo.getId()));
         return result;
     }
@@ -285,6 +313,26 @@ public class ItemInfoServiceImpl extends ServiceImpl<ItemInfoMapper, ItemInfo> i
         if (ObjectUtil.isNotEmpty(queryVO.getStationIds())) {
             // 多仓位组查询（AI 对话查询：仓库名称解析后的 id 组）
             wrapper.in(ItemInfo::getStationId, queryVO.getStationIds());
+        }
+        if (ObjectUtil.isNotEmpty(queryVO.getIdList())) {
+            // 检索索引全文命中后的主键圈定（仅数字 id 入过滤，异常数据跳过）
+            List<Long> idValues = queryVO.getIdList().stream()
+                    .filter(ObjectUtil::isNotEmpty)
+                    .map(s -> {
+                        try {
+                            return Long.parseLong(s.trim());
+                        } catch (NumberFormatException e) {
+                            return null;
+                        }
+                    })
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            if (!idValues.isEmpty()) {
+                wrapper.in(ItemInfo::getId, idValues);
+            } else {
+                // 全部非法 id：强制空结果（不放大查询范围）
+                wrapper.apply("1 = 0");
+            }
         }
         // 排序字段白名单，防注入
         Map<String, SFunction<ItemInfo, ?>> sortColumns = Map.of(

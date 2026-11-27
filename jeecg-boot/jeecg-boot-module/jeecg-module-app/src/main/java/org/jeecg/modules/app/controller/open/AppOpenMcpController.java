@@ -2,6 +2,7 @@ package org.jeecg.modules.app.controller.open;
 
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -10,6 +11,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.config.shiro.IgnoreAuth;
+import org.jeecg.modules.ai.service.AiAgentService;
+import org.jeecg.modules.ai.tooling.ItemTools;
 import org.jeecg.modules.app.entity.OpenAppCredential;
 import org.jeecg.modules.app.openapi.OpenAuditLogger;
 import org.jeecg.modules.app.openapi.OpenRateLimiter;
@@ -77,6 +80,10 @@ public class AppOpenMcpController {
                     "fields", Map.of("type", "string", "description", "逗号分隔的 attributes element 列表，如 name,price 对应 element 编号")),
                     List.of("keyword")),
             tool("get_stats", "物品聚合统计（总数/按状态/按分类/总价值，仅聚合值无明细）", Map.of(), List.of()),
+            tool("parse_item_draft", "自然语言建档解析服务（不落库）。将用户对物品的描述解析为结构化草稿：draft 草稿卡 + attributes 可提交数组 + confidence 置信度 + manualFill 敏感字段手动补录提示。restricted 字段（证件号/密码/精确位置等）绝不参与解析。创建动作：attributes 与 confidence 经二次确认后调用 add_item（>=85 直接入库，<85 转草稿态由用户在 App 确认）。", Map.of(
+                    "text", Map.of("type", "string", "description", "物品的自然语言描述（必填）"),
+                    "image_url", Map.of("type", "string", "description", "可选：物品图片 URL（http/https），辅助识别")),
+                    List.of("text")),
             tool("add_item", "为用户新增物品。attributes 必填组件：1 名称 / 2 图标(合法URL) / 3 类别；sensitivity 由服务端单点计算，请求方传入无效。confidence>=85 直接入库，否则草稿确认态（App 端会弹确认）。", Map.of(
                     "attributes", Map.of(
                             "type", "array",
@@ -131,6 +138,12 @@ public class AppOpenMcpController {
 
     @Autowired
     private AppOpenService appOpenService;
+
+    @Autowired
+    private AiAgentService agentService;
+
+    @Autowired
+    private ItemTools itemTools;
 
     @Autowired
     private org.jeecg.modules.app.service.ItemFlowService itemFlowService;
@@ -304,6 +317,17 @@ public class AppOpenMcpController {
                     yield JSON.toJSONString(out);
                 }
                 case "get_stats" -> JSON.toJSONString(appOpenService.stats(credential.getBoundUid()));
+                case "parse_item_draft" -> {
+                    String text = arguments.getString("text");
+                    if (StrUtil.isEmpty(text)) {
+                        yield null;
+                    }
+                    String imageUrl = arguments.getString("image_url");
+                    if (StrUtil.isNotEmpty(imageUrl) && !imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) {
+                        yield null;
+                    }
+                    yield JSON.toJSONString(parseDraftResult(credential.getBoundUid(), text, imageUrl));
+                }
                 case "add_item" -> {
                     Object idem = arguments.get("idempotencyKey");
                     String idempotencyKey = idem == null ? UUID.randomUUID().toString() : String.valueOf(idem);
@@ -378,6 +402,37 @@ public class AppOpenMcpController {
     }
 
     // ================================ 私有工具 ================================
+
+    /**
+     * parse_item_draft 结果组装（P6 建档解析服务）：draft 有可用 attributes 时 parsed=true，
+     * 输出 {draft, attributes, confidence, manualFill, next_step}；否则 parsed=false + reply。
+     * attributes 经 ItemTools.buildAttributes（restricted/未知 element 兜底丢弃）——
+     * 外部 agent 拿到的可提交数组不含敏感元素（红线随工具封装继承）。
+     */
+    private JSONObject parseDraftResult(String uid, String text, String imageUrl) {
+        JSONObject decision = agentService.parseDraft(uid, text,
+                StrUtil.isEmpty(imageUrl) ? null : List.of(imageUrl));
+        JSONObject out = new JSONObject(true);
+        JSONObject draft = decision.getJSONObject("draft");
+        JSONArray attributes = draft == null ? null : JSON.parseArray(itemTools.buildAttributes(draft));
+        if (attributes == null || attributes.isEmpty()) {
+            out.put("parsed", false);
+            out.put("reply", StrUtil.blankToDefault(decision.getString("reply"),
+                    "未能从描述中解析出可建档的物品信息，请补充物品名称、类别与特征"));
+            return out;
+        }
+        out.put("parsed", true);
+        out.put("draft", draft);
+        out.put("attributes", attributes);
+        out.put("confidence", decision.getIntValue("confidence"));
+        JSONArray manual = draft.getJSONArray("manualFill");
+        if (manual != null && !manual.isEmpty()) {
+            // 克隆断开与 draft.manualFill 的共享引用，避免 fastjson2 输出 $ref 路径（外部 Agent 不可读）
+            out.put("manualFill", JSON.parseArray(manual.toJSONString()));
+        }
+        out.put("next_step", "将 attributes 与 confidence 二次确认后调用 add_item 提交（confidence>=85 直接入库，<85 转草稿态由用户在 App 确认）");
+        return out;
+    }
 
     private Map<String, Object> auditAndToolResult(HttpServletRequest request, OpenAppCredential credential,
                                                    String toolName, boolean write, JSONObject arguments,

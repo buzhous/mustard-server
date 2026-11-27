@@ -46,4 +46,7 @@ public class AiChatSendVO implements Serializable {
 
     @Schema(description = "express 直接建档件数（数量 ×N，direct=true 时可用）")
     private Integer quantity;
+
+    @Schema(description = "P7 票据预填：OCR 结构化块 {merchant, purchase_time, amount, summary}（仅 mode=receipt 识别成功返回，其余为 null）")
+    private com.alibaba.fastjson.JSONObject receipt;
 }

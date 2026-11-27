@@ -200,6 +200,14 @@ public class ItemSyncController extends JeecgController<ItemSync, IItemSyncServi
             return Result.error(ExceptionEnum.USER_INFO_NOT_EXIST.getMsg());
         }
         syncRateLimitService.checkLimit(loginUser.getId());
+        // L4 节流（P2-8）：10s 窗口内且服务端无更新 → 静默空增量（客户端按空结果推进水位，不重试）
+        if (!syncRateLimitService.checkPullInterval(loginUser.getId())) {
+            ItemSyncDownloadIncrementalRspVO empty = new ItemSyncDownloadIncrementalRspVO()
+                    .setServerTime(System.currentTimeMillis())
+                    .setTotalCount(0)
+                    .setHasMore(false);
+            return Result.OK(empty);
+        }
         syncVO.setUserId(loginUser.getId());
         ItemSyncDownloadIncrementalRspVO downloadRspVO = itemSyncService.syncDownloadIncremental(syncVO);
         return Result.OK(downloadRspVO);

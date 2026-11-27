@@ -33,11 +33,23 @@ public class AppAiChatController {
     private final IAiChatMessageService messageService;
     private final AiAuthPort authPort;
 
+    /** 高峰横幅开关（P2-8）：配置 ai.peak-banner.enabled，默认 false */
+    @org.springframework.beans.factory.annotation.Value("${ai.peak-banner.enabled:false}")
+    private boolean aiPeakBanner;
+
     public AppAiChatController(IAiChatSessionService sessionService, IAiChatMessageService messageService,
                                AiAuthPort authPort) {
         this.sessionService = sessionService;
         this.messageService = messageService;
         this.authPort = authPort;
+    }
+
+    @Operation(summary = "入口配置下发（高峰横幅开关等）")
+    @GetMapping("/config")
+    public Result<com.alibaba.fastjson.JSONObject> config() {
+        com.alibaba.fastjson.JSONObject out = new com.alibaba.fastjson.JSONObject(true);
+        out.put("aiPeakBanner", aiPeakBanner);
+        return Result.OK(out);
     }
 
     @Operation(summary = "创建新会话")

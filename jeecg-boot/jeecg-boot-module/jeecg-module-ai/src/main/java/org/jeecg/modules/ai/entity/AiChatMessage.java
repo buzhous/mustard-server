@@ -43,6 +43,8 @@ public class AiChatMessage implements Serializable {
     public static final String TYPE_PROCESS = "process";
     /** 消息类型：查询结果卡（draft_snapshot 复用为查询结果 JSON，C2） */
     public static final String TYPE_QUERY_RESULT = "query_result";
+    /** 消息类型：更新确认卡（draft_snapshot 复用为更新对照卡 JSON，P5 update 意图） */
+    public static final String TYPE_UPDATE_CARD = "update_card";
 
     @TableId(type = IdType.ASSIGN_ID)
     @Schema(description = "主键")

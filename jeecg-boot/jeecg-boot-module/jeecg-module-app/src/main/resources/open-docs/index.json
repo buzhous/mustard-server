@@ -1,0 +1,61 @@
+{
+  "platform": "芥子空间开放平台",
+  "version": "1.1.0",
+  "generated": "2026-11-27",
+  "docs": [
+    {
+      "slug": "quickstart",
+      "title": "快速接入",
+      "summary": "登录、创建应用、取得 AppKey、发起第一次调用",
+      "keywords": ["快速开始", "AppKey", "登录", "应用", "接入", "调用"],
+      "methods": [],
+      "paths": [],
+      "scope": []
+    },
+    {
+      "slug": "authentication",
+      "title": "API 鉴权",
+      "summary": "开放平台鉴权方式：Access Token（JWT）与 AppKey 直连、Scope 权限、限流与幂等",
+      "keywords": ["鉴权", "Access Token", "JWT", "AppKey", "appkey 请求头", "Scope", "限流", "幂等", "密钥", "启用", "禁用", "删除"],
+      "methods": [],
+      "paths": ["/app/open/**", "/app/authorization/**"],
+      "scope": ["readonly", "readwrite"]
+    },
+    {
+      "slug": "items",
+      "title": "物品管理 API",
+      "summary": "物品开放接口（直连）：增删改查、统计、账本，MIP 出域契约",
+      "keywords": ["物品", "直连", "appkey", "MIP", "账本", "增删改查", "统计", "开放接口"],
+      "methods": ["GET", "POST"],
+      "paths": ["/app/open/item/list", "/app/open/item/detail", "/app/open/item/search", "/app/open/item/stats", "/app/open/item/lineage", "/app/open/item/add", "/app/open/item/update", "/app/open/item/delete"],
+      "scope": ["readonly", "readwrite"]
+    },
+    {
+      "slug": "rest-openapi",
+      "title": "物品开放 REST API（直连）",
+      "summary": "/app/open/* 直连端点：物品查询、统计、账本、受控写入与赠送三步流",
+      "keywords": ["直连", "appkey", "REST", "物品", "列表", "统计", "账本", "创建", "赠送", "幂等", "限流", "contentHash"],
+      "methods": ["GET", "POST"],
+      "paths": ["/app/open/item/list", "/app/open/item/detail", "/app/open/item/search", "/app/open/item/stats", "/app/open/item/lineage", "/app/open/item/add", "/app/open/item/update", "/app/open/item/delete", "/app/open/gift/preview", "/app/open/gift/send", "/app/open/flow/offer", "/app/open/flow/accept", "/app/open/flow/reject", "/app/open/flow/cancel"],
+      "scope": ["readonly", "readwrite"]
+    },
+    {
+      "slug": "mcp",
+      "title": "MCP Server 接入",
+      "summary": "通过 MCP 协议（2024-11-05）在 Cursor / Claude 等 AI 客户端中读写芥子空间物品；建档以解析服务（parse_item_draft）形态开放",
+      "keywords": ["MCP", "SSE", "Streamable HTTP", "tools", "JSON-RPC", "AI", "Agent", "Cursor", "Claude", "list_items", "add_item", "gift_item", "parse_item_draft", "建档解析"],
+      "methods": ["GET", "POST"],
+      "paths": ["/app/open/mcp/sse"],
+      "scope": ["readonly", "readwrite"]
+    },
+    {
+      "slug": "errors",
+      "title": "错误码",
+      "summary": "开放 API 统一响应结构与错误码排查",
+      "keywords": ["错误码", "错误", "异常", "401", "403", "404", "422", "429", "500", "HTTP"],
+      "methods": [],
+      "paths": [],
+      "scope": []
+    }
+  ]
+}

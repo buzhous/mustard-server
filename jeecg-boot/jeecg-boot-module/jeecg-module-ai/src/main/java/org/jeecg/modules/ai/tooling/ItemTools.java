@@ -186,10 +186,6 @@ public class ItemTools {
         return itemReadPort.itemDetail(uid, itemId);
     }
 
-    public AiItemRow getItemByOriId(String uid, String oriId) {
-        return itemReadPort.queryByOriId(uid, oriId);
-    }
-
     public JSONObject getStats(String uid) {
         return itemReadPort.stats(uid);
     }

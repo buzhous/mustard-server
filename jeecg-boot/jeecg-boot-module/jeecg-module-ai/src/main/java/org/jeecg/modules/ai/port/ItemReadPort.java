@@ -33,9 +33,20 @@ public interface ItemReadPort {
     Page<AiItemRow> listByCondition(AiItemQuery query);
 
     /**
-     * 按 oriId 查询物品（不存在返回 null）
+     * 按 itemId 查询物品（不存在返回 null）
      */
-    AiItemRow queryByOriId(String uid, String oriId);
+    AiItemRow queryByItemId(String uid, String itemId);
+
+    /**
+     * 别名扩展（P2-6 检索新链①）：词表命中返回 [原词, 标准词...]，未命中返回仅含原词的单元素列表
+     */
+    List<String> aliasExpand(String term);
+
+    /**
+     * 检索索引查询（P2-6 检索新链①②）：terms 任一命中全文索引（ngram），
+     * filter 其余条件（category/tag/level/status/price/时间/仓位/排序分页）同步生效
+     */
+    Page<AiItemRow> searchIndexQuery(String uid, List<String> terms, AiItemQuery filter);
 
     /**
      * 用户物品实际在用的分类值列表（原 distinctItemCategories 的 LambdaQueryWrapper 查询：

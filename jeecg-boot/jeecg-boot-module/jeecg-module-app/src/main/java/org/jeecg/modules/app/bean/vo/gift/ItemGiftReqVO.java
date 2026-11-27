@@ -32,9 +32,6 @@ public class ItemGiftReqVO implements Serializable {
     @Schema(description = "物品ID", requiredMode = Schema.RequiredMode.REQUIRED)
     private String itemId;
 
-    @Schema(description = "物品原始ID", requiredMode = Schema.RequiredMode.REQUIRED)
-    private String oriId;
-
     @Schema(description = "赠送数量", requiredMode = Schema.RequiredMode.REQUIRED)
     private Integer quantity;
 

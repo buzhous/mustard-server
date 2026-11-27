@@ -8,6 +8,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.modules.ai.adapter.AiGlobalSemaphore;
 import org.jeecg.modules.ai.adapter.AiModelAdapter;
 import org.jeecg.modules.ai.adapter.AiRateLimiter;
 import org.jeecg.modules.ai.bean.dto.AiCategoryRef;
@@ -21,6 +22,7 @@ import org.jeecg.modules.ai.entity.AiChatMessage;
 import org.jeecg.modules.ai.entity.AiChatSession;
 import org.jeecg.modules.ai.mip.MipEventType;
 import org.jeecg.modules.ai.port.ItemReadPort;
+import org.jeecg.modules.ai.port.ObservabilityPort;
 import org.jeecg.modules.ai.port.TaxonomyPort;
 import org.jeecg.modules.ai.service.impl.AiChatMessageServiceImpl;
 import org.jeecg.modules.ai.service.impl.AiChatSessionServiceImpl;
@@ -90,21 +92,57 @@ public class AiQueryService {
     private final ItemReadPort itemReadPort;
     private final AiModelAdapter modelAdapter;
     private final AiRateLimiter rateLimiter;
+    private final ObservabilityPort observabilityPort;
+    private final AiGlobalSemaphore semaphore;
+    /** 调优配置读路径（P4：DB enabled 提示词/检索开关/缓存参数优先于内置，异常降级内置） */
+    private final org.jeecg.modules.ai.config.TuningConfigService tuningConfigService;
+    /** 查询意图缓存（P4：search_items 结果卡 Redis TTL 缓存，写路径失效在 app 侧） */
+    private final AiQueryCacheService queryCacheService;
 
     private volatile String promptTemplate;
+
+    /** L2 conv 槽位等待上限（毫秒）：超时抛 QUEUE_TIMEOUT */
+    private static final long CONV_WAIT_MS = 3000;
+
+    /** conv 槽位最大并发数（配置 ai.semaphore.conv-max，默认 300） */
+    @org.springframework.beans.factory.annotation.Value("${ai.semaphore.conv-max:300}")
+    private int convMax;
+
+    /** 检索新链灰度开关（P2-6）：别名扩展 / 索引直查，默认开启 */
+    @org.springframework.beans.factory.annotation.Value("${ai.search.alias-enabled:true}")
+    private volatile boolean aliasEnabled;
+    @org.springframework.beans.factory.annotation.Value("${ai.search.index-enabled:true}")
+    private volatile boolean indexEnabled;
 
     public AiQueryService(AiChatSessionServiceImpl sessionService,
                           AiChatMessageServiceImpl messageService,
                           TaxonomyPort taxonomyPort,
                           ItemReadPort itemReadPort,
                           AiModelAdapter modelAdapter,
-                          AiRateLimiter rateLimiter) {
+                          AiRateLimiter rateLimiter,
+                          ObservabilityPort observabilityPort,
+                          AiGlobalSemaphore semaphore,
+                          org.jeecg.modules.ai.config.TuningConfigService tuningConfigService,
+                          AiQueryCacheService queryCacheService) {
         this.sessionService = sessionService;
         this.messageService = messageService;
         this.taxonomyPort = taxonomyPort;
         this.itemReadPort = itemReadPort;
         this.modelAdapter = modelAdapter;
         this.rateLimiter = rateLimiter;
+        this.observabilityPort = observabilityPort;
+        this.semaphore = semaphore;
+        this.tuningConfigService = tuningConfigService;
+        this.queryCacheService = queryCacheService;
+    }
+
+    /** yml 内置默认灰度开关（admin 调优页展示「当前生效值+来源」用） */
+    public boolean defaultAliasEnabled() {
+        return aliasEnabled;
+    }
+
+    public boolean defaultIndexEnabled() {
+        return indexEnabled;
     }
 
     // ================================ 意图路由 ================================
@@ -136,8 +174,40 @@ public class AiQueryService {
     /**
      * 对话式查询（可带流式事件汇）：sink 非空为 SSE 通道——assistant 消息落库即推、解析阶段事件推送，
      * 限流由端点前置（此处跳过防双重计数）；sink 为空为旧一次性 POST 行为，完全不变。
+     * <p>
+     * L2 全局并发（P2-8）：一次 send 处理占一个 conv 槽（try/finally 包裹，编排轮次间空闲不占槽）；
+     * 未立即得槽且为 SSE 通道时推 queued 阶段事件（B.5 排队 stepper），等待 ≤3s 超时抛 QUEUE_TIMEOUT。
      */
     public AiChatSendVO send(String uid, String sessionId, String text, List<String> images, AiStreamSink sink) {
+        semaphore.beginRequest();
+        boolean acquired = false;
+        try {
+            acquired = acquireConvSlot(sink);
+            return doSend(uid, sessionId, text, images, sink);
+        } finally {
+            if (acquired) {
+                semaphore.release(AiGlobalSemaphore.SEM_CONV);
+            }
+            semaphore.endRequest();
+        }
+    }
+
+    /** L2 conv 槽位获取：未立即得槽且 SSE 通道先推 queued，再等待 ≤3s，超时抛 QUEUE_TIMEOUT；返回是否获得槽位 */
+    private boolean acquireConvSlot(AiStreamSink sink) {
+        boolean ok = semaphore.tryAcquire(AiGlobalSemaphore.SEM_CONV, convMax, 0);
+        if (!ok) {
+            if (sink != null) {
+                sink.progress("queued");
+            }
+            ok = semaphore.tryAcquire(AiGlobalSemaphore.SEM_CONV, convMax, CONV_WAIT_MS);
+        }
+        if (!ok) {
+            throw new AppException(AiErrorEnum.QUEUE_TIMEOUT);
+        }
+        return true;
+    }
+
+    private AiChatSendVO doSend(String uid, String sessionId, String text, List<String> images, AiStreamSink sink) {
         AiChatSession session = sessionService.getOwned(uid, sessionId);
         if (session == null) {
             throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
@@ -313,16 +383,74 @@ public class AiQueryService {
         query.setPageNo(page == null ? 1 : page);
         query.setPageSize(pageSize == null ? MAX_PAGE_SIZE : pageSize);
 
-        Page<AiItemRow> result = itemReadPort.listByCondition(query);
-        log.info("[ai-query] search keyword={}, categoryList={}, firstTotal={}, usedCategoryValues={}, userCategories={}",
-                query.getKeyword(), query.getCategoryList(), result.getTotal(),
-                usedCategoryValues,
+        // 意图缓存（P4）：search_items 结果卡 Redis TTL 缓存，命中直接返回（cached 标记入埋点）；
+        // 写失效由 app 侧物品写路径 evictUid 保证，缓存异常一律视为未命中不影响查询
+        String qcacheKey = null;
+        if (queryCacheService.enabled()) {
+            try {
+                qcacheKey = queryCacheService.cacheKey(uid, query, userText);
+                JSONObject cachedCard = queryCacheService.get(qcacheKey);
+                if (cachedCard != null) {
+                    JSONObject traceData = new JSONObject(true);
+                    traceData.put("cached", true);
+                    traceData.put("stages", List.of(stage("cache", true, 0)));
+                    traceData.put("queryText", query.getKeyword());
+                    traceData.put("categoryWords", query.getCategoryList());
+                    traceData.put("finalTotal", cachedCard.getIntValue("total"));
+                    traceData.put("totalMs", 0);
+                    observabilityPort.fire("ai_search_trace", uid, traceData);
+                    return cachedCard;
+                }
+            } catch (Exception ignore) {
+                qcacheKey = null;
+            }
+        }
+
+        // 检索新链（P2-6）：仅 keyword 非空时执行 ① 别名扩展 → 索引查询 ② 索引直查；
+        // 未命中回退原兜底链 ③④⑤（keyword 转分类 / 分类漂移 / 渐进放宽），行为不变
+        Page<AiItemRow> result = null;
+        String hitSource = null;
+        long traceStart = System.nanoTime();
+        List<Map<String, Object>> traceStages = new ArrayList<>();
+        if (StrUtil.isNotBlank(query.getKeyword())) {
+            if (tuningConfigService.boolOpt(org.jeecg.modules.ai.config.TuningConfigService.KEY_SEARCH_ALIAS_ENABLED, aliasEnabled)) {
+                long t0 = System.nanoTime();
+                List<String> terms = itemReadPort.aliasExpand(query.getKeyword());
+                if (terms.size() > 1) {
+                    Page<AiItemRow> aliasResult = itemReadPort.searchIndexQuery(uid, terms, query);
+                    boolean hit = aliasResult.getTotal() > 0;
+                    traceStages.add(stage("alias", hit, (System.nanoTime() - t0) / 1_000_000));
+                    if (hit) {
+                        result = aliasResult;
+                        hitSource = "alias:" + terms.get(1);
+                    }
+                } else {
+                    traceStages.add(stage("alias", false, (System.nanoTime() - t0) / 1_000_000));
+                }
+            }
+            if (result == null && tuningConfigService.boolOpt(org.jeecg.modules.ai.config.TuningConfigService.KEY_SEARCH_INDEX_ENABLED, indexEnabled)) {
+                long t1 = System.nanoTime();
+                Page<AiItemRow> indexResult = itemReadPort.searchIndexQuery(uid, List.of(query.getKeyword()), query);
+                boolean hitIdx = indexResult.getTotal() > 0;
+                traceStages.add(stage("index", hitIdx, (System.nanoTime() - t1) / 1_000_000));
+                if (hitIdx) {
+                    result = indexResult;
+                    hitSource = "index";
+                }
+            }
+        }
+        if (result == null) {
+            result = itemReadPort.listByCondition(query);
+        }
+        log.info("[ai-query] search keyword={}, categoryList={}, firstTotal={}, hitSource={}, userCategories={}",
+                query.getKeyword(), query.getCategoryList(), result.getTotal(), hitSource,
                 categories.stream().filter(AiCategoryRef::isUser).map(AiCategoryRef::getName).toList());
         // keyword 转分类兜底：模型把泛称（如「证件」）当关键词且未给任何分类参数时，
         // 首查 0 行则尝试将 keyword 按分类名/备注解析（复用三级放宽匹配），
         // 命中分类后按分类重查物品，补齐「查询词命中分类维度」的召回路径
         if (result.getTotal() == 0 && query.getKeyword() != null
                 && (query.getCategoryList() == null || query.getCategoryList().isEmpty())) {
+            long tKac = System.nanoTime();
             JSONObject keywordAsCategory = new JSONObject();
             keywordAsCategory.put("category", query.getKeyword());
             Set<String> fallback = resolveCategoryValues(uid, keywordAsCategory, categories, usedCategoryValues);
@@ -333,6 +461,10 @@ public class AiQueryService {
                         .setKeyword(null)
                         .setCategoryList(new ArrayList<>(fallback)));
                 log.info("[ai-query] keyword-as-category retryTotal={}", result.getTotal());
+                traceStages.add(stage("keyword_as_category", result.getTotal() > 0,
+                        (System.nanoTime() - tKac) / 1_000_000));
+            } else {
+                traceStages.add(stage("keyword_as_category", false, (System.nanoTime() - tKac) / 1_000_000));
             }
         }
         // 分类漂移扩展：LLM 输出的近名分类（如「证件票据」）精确命中字典，但物品实际
@@ -369,13 +501,18 @@ public class AiQueryService {
             }
             // remark 词表只覆盖部分建档自由词（如含「身份证」但无「护照」「驾驶证」），
             // LLM 挑值不受重查结果短路：总是执行并与 remark 匹配合并为一次重查
+            long tLlm = System.nanoTime();
             Set<String> picked = pickValuesByLlm(userText, query.getCategoryList(), usedCategoryValues);
             log.info("[ai-query] llm-value-pick picked={}", picked);
+            traceStages.add(stage("llm_pick", !picked.isEmpty(), (System.nanoTime() - tLlm) / 1_000_000));
             expanded.addAll(picked);
             if (expanded.size() > query.getCategoryList().size()) {
+                long tDrift = System.nanoTime();
                 log.info("[ai-query] category-drift expand: {} -> {}", query.getCategoryList(), expanded);
                 result = itemReadPort.listByCondition(new AiItemQuery(query)
                         .setCategoryList(new ArrayList<>(expanded)));
+                traceStages.add(stage("category_drift", result.getTotal() > 0,
+                        (System.nanoTime() - tDrift) / 1_000_000));
             }
         }
         // 渐进放宽：keyword 与 categoryList 同时生效时 AND 语义易双空（如模型把泛称
@@ -383,6 +520,7 @@ public class AiQueryService {
         // 全量 0 行时依次丢 keyword → 丢 categoryList 重试，最大化召回
         if (result.getTotal() == 0 && query.getKeyword() != null
                 && query.getCategoryList() != null && !query.getCategoryList().isEmpty()) {
+            long tRel = System.nanoTime();
             result = itemReadPort.listByCondition(new AiItemQuery(query)
                     .setKeyword(null));
             if (result.getTotal() == 0) {
@@ -390,6 +528,7 @@ public class AiQueryService {
                         .setCategoryList(null)
                         .setKeyword(relaxedKeyword(query.getKeyword())));
             }
+            traceStages.add(stage("relaxed", result.getTotal() > 0, (System.nanoTime() - tRel) / 1_000_000));
         }
 
         Map<String, String> categoryNames = categoryNames(categories);
@@ -408,14 +547,57 @@ public class AiQueryService {
             row.put("createTime", item.getCreateTime() == null ? null : item.getCreateTime().getTime());
             items.add(row);
         }
+        // 兜底链埋点（P2-7 + P4 增强）：单查询 1 条 ai_search_trace
+        // {stages:[{stage,hit,ms}], totalMs, queryText, categoryWords, finalTotal}
+        // queryText/finalTotal 为样本归因与低命中样本自动入库（观测→样本池闭环）必需
+        if (!traceStages.isEmpty()) {
+            JSONObject traceData = new JSONObject(true);
+            traceData.put("stages", traceStages);
+            traceData.put("totalMs", (System.nanoTime() - traceStart) / 1_000_000);
+            traceData.put("queryText", query.getKeyword());
+            traceData.put("categoryWords", query.getCategoryList());
+            traceData.put("finalTotal", result.getTotal());
+            observabilityPort.fire("ai_search_trace", uid, traceData);
+        }
         JSONObject card = new JSONObject(true);
         card.put("card", "query");
         card.put("type", "search_items");
+        if (hitSource != null) {
+            card.put("hitSource", hitSource);
+        }
         card.put("total", result.getTotal());
         card.put("page", query.getPageNo());
         card.put("pageSize", query.getPageSize());
         card.put("items", items);
+        // 意图缓存回填（P4）：仅在进入缓存判定且未命中时写入，异常吞掉
+        if (qcacheKey != null) {
+            queryCacheService.put(qcacheKey, card);
+        }
         return card;
+    }
+
+    /**
+     * 关键词检索卡（P5 update 定位失败回退）：复用 searchCard 全兜底链与意图缓存，
+     * 按 keyword（可选 category 消歧）构造查询参数。userText 供 LLM 挑值与缓存键归一。
+     */
+    public JSONObject keywordSearchCard(String uid, String keyword, String category, String userText) {
+        List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
+        Set<String> usedCategoryValues = distinctItemCategories(uid);
+        JSONObject params = new JSONObject(true);
+        params.put("keyword", clipStr(keyword, MAX_KEYWORD));
+        if (StrUtil.isNotBlank(category)) {
+            params.put("category", category);
+        }
+        return searchCard(uid, categories, usedCategoryValues, params, null, userText);
+    }
+
+    /** 埋点 stage 结构：{stage, hit, ms} */
+    private Map<String, Object> stage(String name, boolean hit, long ms) {
+        Map<String, Object> s = new LinkedHashMap<>();
+        s.put("stage", name);
+        s.put("hit", hit);
+        s.put("ms", ms);
+        return s;
     }
 
     /**
@@ -524,7 +706,7 @@ public class AiQueryService {
         return card;
     }
 
-    /** get_item_lineage：流转账本（itemId 支持 id/oriId，缺省用 itemName 精确解析；去哈希仅保留用户可读事件） */
+    /** get_item_lineage：流转账本（itemId 直查，缺省用 itemName 精确解析；去哈希仅保留用户可读事件） */
     private JSONObject lineageCard(String uid, JSONObject params) {
         String itemId = params == null ? null : StrUtil.trimToNull(params.getString("itemId"));
         String itemName = params == null ? null : StrUtil.trimToNull(params.getString("itemName"));
@@ -533,13 +715,9 @@ public class AiQueryService {
         }
         String resolvedId = null;
         if (itemId != null) {
-            if (itemReadPort.itemDetail(uid, itemId) != null) {
-                resolvedId = itemId;
-            } else {
-                AiItemRow byOriId = itemReadPort.queryByOriId(uid, itemId);
-                if (byOriId != null) {
-                    resolvedId = String.valueOf(byOriId.getId());
-                }
+            AiItemRow row = itemReadPort.queryByItemId(uid, itemId);
+            if (row != null) {
+                resolvedId = String.valueOf(row.getId());
             }
         }
         if (resolvedId == null && itemName != null) {
@@ -592,7 +770,7 @@ public class AiQueryService {
     // ================================ v2 · get_item 详情卡 ================================
 
     /**
-     * get_item：单物品定位（itemId / oriId / itemName 三选一，可选 category 消歧）→ 详情卡。
+     * get_item：单物品定位（itemId / itemName 二选一，可选 category 消歧）→ 详情卡。
      * 属性摘要取自 itemDetail 出域实例（MipRedlineFilter 已过滤 restricted，第二重防线兜底）；
      * 0/多件返回 null，由调用方回退 search_items 关键词卡。
      */
@@ -602,16 +780,12 @@ public class AiQueryService {
             return null;
         }
         String itemId = StrUtil.trimToNull(params.getString("itemId"));
-        String oriId = StrUtil.trimToNull(params.getString("oriId"));
         String itemName = StrUtil.trimToNull(params.getString("itemName"));
         String categoryHint = StrUtil.trimToNull(params.getString("category"));
 
         AiItemRow row = null;
-        if (itemId != null && itemReadPort.itemDetail(uid, itemId) != null) {
-            row = rowById(uid, itemId, categories);
-        }
-        if (row == null && oriId != null) {
-            row = itemReadPort.queryByOriId(uid, oriId);
+        if (itemId != null) {
+            row = itemReadPort.queryByItemId(uid, itemId);
         }
         if (row == null && itemName != null) {
             // 名称唯一命中才出详情卡（0/多件回退 search 卡）；category 消歧：命中分类值后重新限定查询
@@ -683,21 +857,6 @@ public class AiQueryService {
         card.put("type", "get_item");
         card.put("item", item);
         return card;
-    }
-
-    /** itemId → 行摘要（itemDetail 校验存在后，keyword 不可靠，走 oriId 二次解析；oriId 缺失时退化为 list 首行匹配） */
-    private AiItemRow rowById(String uid, String itemId, List<AiCategoryRef> categories) {
-        // listByCondition 无 id 过滤：经 detail 拿 oriId 再精确定位
-        JSONObject detail = itemReadPort.itemDetail(uid, itemId);
-        if (detail == null) {
-            return null;
-        }
-        String oriId = detail.getJSONObject("identity") == null
-                ? null : StrUtil.trimToNull(detail.getJSONObject("identity").getString("ori_id"));
-        if (oriId != null) {
-            return itemReadPort.queryByOriId(uid, oriId);
-        }
-        return null;
     }
 
     /** 仓位 id → 展示名（虚拟仓/真实站点仓统一映射；未命中返回 null） */
@@ -988,6 +1147,12 @@ public class AiQueryService {
     }
 
     private String template() {
+        // P4：DB enabled 配置优先于内置技能包文件（两段契约 STAGE_SPLIT 由保存侧校验完整性）
+        return tuningConfigService.queryPrompt(builtinTemplate());
+    }
+
+    /** 内置技能包懒加载（保留双检锁单例缓存） */
+    private String builtinTemplate() {
         if (promptTemplate == null) {
             synchronized (this) {
                 if (promptTemplate == null) {

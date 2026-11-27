@@ -65,6 +65,9 @@ public class ItemInfoQueryVO implements Serializable {
     @Schema(description = "多仓位ID列表（AI 对话查询：仓库名称解析后的 id 组）")
     private List<String> stationIds;
 
+    @Schema(description = "物品ID列表（检索索引全文命中后的主键圈定，与其余过滤条件 AND 叠加）")
+    private List<String> idList;
+
     @Schema(description = "排序字段：created/name/price/quantity/status")
     private String orderBy;
 

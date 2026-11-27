@@ -74,6 +74,9 @@ public class ItemInfo implements Serializable {
     @Schema(description = "状态")
     private Integer status;
 
+    @Schema(description = "建档来源:manual/ai/mcp/import")
+    private String source;
+
     @Schema(description = "组件列表")
     private String fields;
 

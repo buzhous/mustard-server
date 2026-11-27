@@ -30,10 +30,11 @@ import java.util.Set;
 @Service
 public class StatsEventService {
 
-    /** 事件白名单（8 基线事件） */
+    /** 事件白名单（8 基线事件 + P2-7 兜底链观测事件 + P3 会话回放审计） */
     public static final Set<String> ALLOWED_EVENTS = Set.of(
             "app_launch", "register", "first_item_created", "coupon_claimed",
-            "pickup_claimed", "gift_sent", "appkey_activated", "payment_success");
+            "pickup_claimed", "gift_sent", "appkey_activated", "payment_success",
+            "ai_search_trace", "ai_session_viewed");
 
     /** 允许匿名上报的事件（未登录） */
     public static final Set<String> ANONYMOUS_EVENTS = Set.of("app_launch");

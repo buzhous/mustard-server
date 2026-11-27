@@ -37,6 +37,9 @@ public class ItemLineage implements Serializable {
     @Schema(description = "物品全局唯一标识")
     private String oriId;
 
+    @Schema(description = "物品行Id(tbl_item_info.id,事件关联辅助列,不入哈希)")
+    private String itemId;
+
     @Schema(description = "事件类型:mint/gift_out/gift_in/ruins_drop/ruins_pick/transfer/spawn/destroy/recycle/import")
     private String eventType;
 

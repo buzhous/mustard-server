@@ -1,0 +1,320 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "芥子空间开放平台 API",
+    "version": "1.1.0",
+    "description": "物品管理开放 API（AppKey 直连）与 MCP Server。数据范围限定为凭据绑定用户的物品；MIP 出域契约下 restricted 敏感字段全链路脱敏。所有响应为统一 envelope：{success, message, code, result, timestamp}。",
+    "externalDocs": {
+      "description": "文档站（llms.txt / index.json / 章节检索）",
+      "url": "/api/open/docs/llms.txt"
+    }
+  },
+  "servers": [
+    {"url": "/", "description": "当前部署（REST 路径以 /api 为 context-path 前缀）"}
+  ],
+  "security": [{"appkey": []}],
+  "tags": [
+    {"name": "item-query", "description": "物品查询（readonly）"},
+    {"name": "item-write", "description": "物品写入（readwrite，需 X-Idempotency-Key）"},
+    {"name": "gift", "description": "赠送（readwrite，preview→execute 两阶段）"},
+    {"name": "flow", "description": "定向流转（readwrite，offer→accept/reject/cancel，72h 锁定）"},
+    {"name": "mcp", "description": "MCP Server（JSON-RPC 2024-11-05）"}
+  ],
+  "components": {
+    "securitySchemes": {
+      "appkey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "appkey",
+        "description": "开放凭据 AppKey（40 位随机哈希）。readonly 凭据可调查询接口与读类 MCP 工具；写接口与写类工具需 readwrite。"
+      },
+      "idempotencyKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Idempotency-Key",
+        "description": "写操作必填幂等键（任意唯一字符串），24h 内重复提交回放首次结果。"
+      }
+    },
+    "schemas": {
+      "Envelope": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean"},
+          "message": {"type": "string"},
+          "code": {"type": "integer", "description": "0=成功；业务错误码见 errors.md"},
+          "result": {},
+          "timestamp": {"type": "integer"}
+        }
+      },
+      "AttributeItem": {
+        "type": "object",
+        "description": "MIP 属性组件 [{element,value}]：1名称 2图标URL 3类别 7数量 8描述 10标签组 11属性组 12图片组 13价格 14购入时间 15成色 16品牌型号 17序列号(restricted) 21证件号(restricted) 等",
+        "required": ["element", "value"],
+        "properties": {
+          "element": {"type": "integer"},
+          "value": {}
+        }
+      },
+      "ItemSummary": {
+        "type": "object",
+        "properties": {
+          "itemId": {"type": "string", "description": "物品ID（字符串，雪花ID超JS安全整数）"},
+          "name": {"type": "string"},
+          "schemaId": {"type": "string", "description": "MIP schema 指纹"},
+          "contentHash": {"type": "string", "description": "档案内容哈希，可向用户证明完整性"}
+        }
+      },
+      "MipInstance": {
+        "type": "object",
+        "description": "MIP 出域实例：attributes 组件数组（restricted 字段已服务端过滤，绝不返回）",
+        "properties": {
+          "itemId": {"type": "string"},
+          "attributes": {"type": "array", "items": {"$ref": "#/components/schemas/AttributeItem"}},
+          "contentHash": {"type": "string"}
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/app/open/item/list": {
+      "get": {
+        "tags": ["item-query"],
+        "summary": "物品分页查询（轻量摘要，含 schemaId/contentHash）",
+        "parameters": [
+          {"name": "pageNo", "in": "query", "schema": {"type": "integer", "default": 1}},
+          {"name": "pageSize", "in": "query", "schema": {"type": "integer", "default": 10, "maximum": 100}},
+          {"name": "keyword", "in": "query", "schema": {"type": "string"}, "description": "名称/描述模糊匹配"},
+          {"name": "stationId", "in": "query", "schema": {"type": "string"}, "description": "仓位ID"},
+          {"name": "status", "in": "query", "schema": {"type": "integer"}, "description": "0临时 1正常 2使用中"},
+          {"name": "orderBy", "in": "query", "schema": {"type": "string", "enum": ["created", "name", "price", "quantity", "status"]}},
+          {"name": "ascending", "in": "query", "schema": {"type": "boolean"}}
+        ],
+        "responses": {"200": {"description": "分页结果", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/item/detail": {
+      "get": {
+        "tags": ["item-query"],
+        "summary": "物品详情（MIP 实例视图，红线过滤）",
+        "parameters": [{"name": "itemId", "in": "query", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "MIP 实例（restricted 字段已过滤）", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}, "404": {"description": "物品不存在或不属于凭据绑定用户"}}
+      }
+    },
+    "/api/app/open/item/search": {
+      "get": {
+        "tags": ["item-query"],
+        "summary": "物品搜索（keyword 必填，limit≤50）",
+        "parameters": [
+          {"name": "keyword", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "maximum": 50}},
+          {"name": "fields", "in": "query", "schema": {"type": "string"}, "description": "逗号分隔的 element 列表，如 name,price"}
+        ],
+        "responses": {"200": {"description": "轻量摘要列表", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/item/stats": {
+      "get": {
+        "tags": ["item-query"],
+        "summary": "物品统计（仅聚合值，无明细）",
+        "responses": {"200": {"description": "总数/按状态/按分类/总价值", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/item/lineage": {
+      "get": {
+        "tags": ["item-query"],
+        "summary": "流转记录（账本哈希链校验，chainValid 完整性）",
+        "parameters": [
+          {"name": "itemId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer"}, "description": "事件截断条数"}
+        ],
+        "responses": {"200": {"description": "账本事件（逐事件哈希）", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/item/add": {
+      "post": {
+        "tags": ["item-write"],
+        "summary": "新增物品（readwrite）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["attributes", "confidence"],
+            "properties": {
+              "attributes": {"type": "array", "items": {"$ref": "#/components/schemas/AttributeItem"}, "description": "必填组件：1名称/2图标URL/3类别；sensitivity 由服务端计算，请求方传入无效"},
+              "confidence": {"type": "number", "description": "解析置信度 0-100：>=85 直接入库，<85 转草稿确认态（App 端弹确认）"},
+              "source": {"type": "string", "description": "来源标识，如 ai-assistant"}
+            }
+          }}}
+        },
+        "responses": {"200": {"description": "创建结果（含 itemId）", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}, "403": {"description": "scope 不足"}, "422": {"description": "MIP 校验失败（校验器拒绝）"}}
+      }
+    },
+    "/api/app/open/item/update": {
+      "post": {
+        "tags": ["item-write"],
+        "summary": "编辑物品（readwrite，attributes 全量覆盖，账本 update 事件）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["itemId", "attributes"],
+            "properties": {
+              "itemId": {"type": "string"},
+              "attributes": {"type": "array", "items": {"$ref": "#/components/schemas/AttributeItem"}, "description": "全量覆盖"},
+              "confidence": {"type": "number", "description": ">=85 恢复正常态，<85 转草稿；不传保持原状态"}
+            }
+          }}}
+        },
+        "responses": {"200": {"description": "更新结果", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/item/delete": {
+      "post": {
+        "tags": ["item-write"],
+        "summary": "删除物品（readwrite，高危不可恢复，账本 recycle 事件）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["itemId"],
+            "properties": {"itemId": {"type": "string"}}
+          }}}
+        },
+        "responses": {"200": {"description": "删除结果", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/gift/preview": {
+      "post": {
+        "tags": ["gift"],
+        "summary": "赠送预览（readwrite，返回一次性 giftToken，TTL 300s）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["itemId"],
+            "properties": {"itemId": {"type": "string"}}
+          }}}
+        },
+        "responses": {"200": {"description": "预览结果（giftToken + 物品摘要，须完整展示给用户确认）", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/gift/send": {
+      "post": {
+        "tags": ["gift"],
+        "summary": "赠送执行（readwrite，giftToken 一次性，赠送不可撤销）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["giftToken", "toUserId"],
+            "properties": {
+              "giftToken": {"type": "string", "description": "preview 返回的 token"},
+              "toUserId": {"type": "string", "description": "接收方用户ID"}
+            }
+          }}}
+        },
+        "responses": {"200": {"description": "赠送结果（账本 gift_out/gift_in 事件）", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/flow/offer": {
+      "post": {
+        "tags": ["flow"],
+        "summary": "流转要约发起（readwrite，flowToken 绑定接收方，72h 锁定期）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["itemId", "toUserId"],
+            "properties": {
+              "itemId": {"type": "string"},
+              "toUserId": {"type": "string", "description": "接收方 App 用户ID（不能是自己）"}
+            }
+          }}}
+        },
+        "responses": {"200": {"description": "要约结果", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/flow/accept": {
+      "post": {
+        "tags": ["flow"],
+        "summary": "流转确认（readwrite，仅接收方本人凭据，账本 flow_out/flow_in 事件对）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["flowToken"],
+            "properties": {"flowToken": {"type": "string"}}
+          }}}
+        },
+        "responses": {"200": {"description": "确认结果（归属立即转移）", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/flow/reject": {
+      "post": {
+        "tags": ["flow"],
+        "summary": "流转拒绝（readwrite，仅接收方本人凭据，解锁回退不记账）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["flowToken"],
+            "properties": {"flowToken": {"type": "string"}}
+          }}}
+        },
+        "responses": {"200": {"description": "拒绝结果", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/flow/cancel": {
+      "post": {
+        "tags": ["flow"],
+        "summary": "流转撤回（readwrite，撤回自己发出的要约）",
+        "security": [{"appkey": []}, {"idempotencyKey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "required": ["flowToken"],
+            "properties": {"flowToken": {"type": "string"}}
+          }}}
+        },
+        "responses": {"200": {"description": "撤回结果", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+      }
+    },
+    "/api/app/open/mcp/sse": {
+      "post": {
+        "tags": ["mcp"],
+        "summary": "MCP Streamable HTTP（JSON-RPC 2.0；GET 同路径为 SSE 长连接）",
+        "description": "方法：initialize / tools/list / tools/call / ping。13 个工具：读类 list_items/get_item/get_item_lineage/search_items/get_stats/flow_list/parse_item_draft（readonly 可用）；写类 add_item/update_item/delete_item/gift_item/flow_offer/flow_respond（readwrite）。业务失败按 MCP 规范输出 isError:true。",
+        "security": [{"appkey": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {
+            "type": "object",
+            "properties": {
+              "jsonrpc": {"type": "string", "const": "2.0"},
+              "id": {},
+              "method": {"type": "string", "enum": ["initialize", "tools/list", "tools/call", "ping"]},
+              "params": {
+                "type": "object",
+                "description": "tools/call 时 {name, arguments}；initialize 时 {protocolVersion, capabilities, clientInfo}",
+                "properties": {
+                  "name": {"type": "string", "description": "工具名"},
+                  "arguments": {"type": "object"}
+                }
+              }
+            }
+          }}}
+        },
+        "responses": {"200": {"description": "JSON-RPC 响应（result.content 为工具输出文本 JSON）"}}
+      }
+    }
+  }
+}

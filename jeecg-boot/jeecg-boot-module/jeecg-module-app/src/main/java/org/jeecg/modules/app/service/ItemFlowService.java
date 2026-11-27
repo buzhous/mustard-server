@@ -85,6 +85,9 @@ public class ItemFlowService {
     @Autowired
     private RedisUtil redisUtil;
 
+    @Autowired
+    private org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService;
+
     // ================================ 写内核 ================================
 
     /**
@@ -299,6 +302,7 @@ public class ItemFlowService {
         // 5) 账本事件对（flow_out 发起方放行 → flow_in 接收方领取，同一哈希链）
         lineageService.append(new ItemLineage()
                 .setOriId(item.getOriId())
+                .setItemId(itemId)
                 .setEventType(MipEventType.FLOW_OUT.getCode())
                 .setFromUid(LineageService.hashUid(fromUid))
                 .setToUid(LineageService.hashUid(toUserId))
@@ -307,6 +311,7 @@ public class ItemFlowService {
                 .setIdempotencyKey("flow_out:" + flowToken));
         lineageService.append(new ItemLineage()
                 .setOriId(item.getOriId())
+                .setItemId(itemId)
                 .setEventType(MipEventType.FLOW_IN.getCode())
                 .setFromUid(LineageService.hashUid(fromUid))
                 .setToUid(LineageService.hashUid(toUserId))
@@ -315,6 +320,8 @@ public class ItemFlowService {
                 .setIdempotencyKey("flow_in:" + flowToken));
         // 6) token 作废 + 解锁
         releaseOffer(flowToken, itemId);
+        // 检索索引重建（归属转移后 uid 变更，同事务）
+        searchIndexService.rebuild(itemId);
         JSONObject out = new JSONObject(true);
         out.put("flowToken", flowToken);
         out.put("itemId", itemId);

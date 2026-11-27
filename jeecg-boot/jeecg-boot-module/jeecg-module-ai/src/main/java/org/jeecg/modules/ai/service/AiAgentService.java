@@ -63,6 +63,8 @@ public class AiAgentService {
     public static final String MODE_EXPRESS = "express";
     /** 模式：mock 模拟建档（虚构补齐完整草稿，免追问，不走免确认创建） */
     public static final String MODE_MOCK = "mock";
+    /** 模式：receipt 票据预填（P7 小票 OCR → 结构化提取 + 预填草稿，识别失败回退普通建档） */
+    public static final String MODE_RECEIPT = "receipt";
 
     private final AiChatSessionServiceImpl sessionService;
     private final AiChatMessageServiceImpl messageService;
@@ -71,12 +73,28 @@ public class AiAgentService {
     private final AiRateLimiter rateLimiter;
     /** C2 对话式查询编排器（意图分流后委托） */
     private final AiQueryService queryService;
+    /** C3 编辑编排器（P5 update 意图，意图分流后委托） */
+    private final AiUpdateService updateService;
     /** R4 受控工具：分类/标签自动创建 */
     private final TaxonomyTools taxonomyTools;
     /** R1/R3 受控工具：attributes 组装 + N 件创建 */
     private final ItemTools itemTools;
+    /** 全局并发信号量（P2-8 限流基建：L2 conv 槽位 + 单请求调用计数） */
+    private final org.jeecg.modules.ai.adapter.AiGlobalSemaphore semaphore;
+    /** 调优配置读路径（P4：DB enabled 提示词/参数优先于内置，异常降级内置） */
+    private final org.jeecg.modules.ai.config.TuningConfigService tuningConfigService;
+
+    /** L2 conv 槽位等待上限（毫秒）：超时抛 QUEUE_TIMEOUT */
+    private static final long CONV_WAIT_MS = 3000;
+
+    /** conv 槽位最大并发数（配置 ai.semaphore.conv-max，默认 300） */
+    @org.springframework.beans.factory.annotation.Value("${ai.semaphore.conv-max:300}")
+    private int convMax;
 
     private volatile String promptTemplate;
+
+    /** P7 票据预填技能包懒加载缓存 */
+    private volatile String receiptPromptTemplate;
 
     public AiAgentService(AiChatSessionServiceImpl sessionService,
                           AiChatMessageServiceImpl messageService,
@@ -84,16 +102,27 @@ public class AiAgentService {
                           AiModelAdapter modelAdapter,
                           AiRateLimiter rateLimiter,
                           AiQueryService queryService,
+                          AiUpdateService updateService,
                           TaxonomyTools taxonomyTools,
-                          ItemTools itemTools) {
+                          ItemTools itemTools,
+                          org.jeecg.modules.ai.adapter.AiGlobalSemaphore semaphore,
+                          org.jeecg.modules.ai.config.TuningConfigService tuningConfigService) {
         this.sessionService = sessionService;
         this.messageService = messageService;
         this.taxonomyPort = taxonomyPort;
         this.modelAdapter = modelAdapter;
         this.rateLimiter = rateLimiter;
         this.queryService = queryService;
+        this.updateService = updateService;
         this.taxonomyTools = taxonomyTools;
         this.itemTools = itemTools;
+        this.semaphore = semaphore;
+        this.tuningConfigService = tuningConfigService;
+    }
+
+    /** 追问预算上限（P4 可经调优配置 agent.max_asks 下发，默认 3） */
+    private int maxAsks() {
+        return tuningConfigService.intOpt(org.jeecg.modules.ai.config.TuningConfigService.KEY_AGENT_MAX_ASKS, MAX_ASKS);
     }
 
     // ================================ S3/S4 · 发送与解析 ================================
@@ -111,13 +140,50 @@ public class AiAgentService {
     /**
      * 聊天发送（可带流式事件汇）：sink 非空为 SSE 通道——阶段/消息事件经 sink 推送，
      * 限流由端点前置（此处跳过防双重计数）；sink 为空为旧一次性 POST 行为，完全不变。
+     * <p>
+     * L2 全局并发（P2-8）：一次 send 处理占一个 conv 槽（try/finally 包裹，编排轮次间空闲不占槽）；
+     * 未立即得槽且为 SSE 通道时推 queued 阶段事件（B.5 排队 stepper），等待 ≤3s 超时抛 QUEUE_TIMEOUT。
      *
      * @param mode normal（默认，对话建档）| express（快速建档）| mock（模拟建档）
      */
     public AiChatSendVO send(String uid, String sessionId, String text, List<String> images,
                              String mode, AiStreamSink sink) {
+        semaphore.beginRequest();
+        boolean acquired = false;
+        try {
+            acquired = acquireConvSlot(sink);
+            return doSend(uid, sessionId, text, images, mode, sink);
+        } finally {
+            if (acquired) {
+                semaphore.release(org.jeecg.modules.ai.adapter.AiGlobalSemaphore.SEM_CONV);
+            }
+            semaphore.endRequest();
+        }
+    }
+
+    /** L2 conv 槽位获取：未立即得槽且 SSE 通道先推 queued，再等待 ≤3s，超时抛 QUEUE_TIMEOUT；返回是否获得槽位 */
+    private boolean acquireConvSlot(AiStreamSink sink) {
+        boolean ok = semaphore.tryAcquire(org.jeecg.modules.ai.adapter.AiGlobalSemaphore.SEM_CONV, convMax, 0);
+        if (!ok) {
+            if (sink != null) {
+                sink.progress("queued");
+            }
+            ok = semaphore.tryAcquire(org.jeecg.modules.ai.adapter.AiGlobalSemaphore.SEM_CONV, convMax, CONV_WAIT_MS);
+        }
+        if (!ok) {
+            throw new AppException(AiErrorEnum.QUEUE_TIMEOUT);
+        }
+        return true;
+    }
+
+    private AiChatSendVO doSend(String uid, String sessionId, String text, List<String> images,
+                                String mode, AiStreamSink sink) {
         if (StrUtil.isBlank(text) && (images == null || images.isEmpty())) {
             throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        // P7 票据预填：小票 OCR → 结构化提取 + 预填草稿（识别失败/非票据回退普通建档，不阻塞）
+        if (MODE_RECEIPT.equals(mode)) {
+            return doSendReceipt(uid, sessionId, text, images, sink);
         }
         boolean express = MODE_EXPRESS.equals(mode);
         // mock 模拟建档：显式 mode=mock 或自然语言模拟话术（express 显式模式优先；模拟话术不转查询管线）
@@ -125,6 +191,13 @@ public class AiAgentService {
         // C2 意图快路径：查询语型走对话式查询管线（复用同会话/限流/消息表）
         if (!mock && AiIntentRouter.routeToQuery(text, images, null, express)) {
             return AiIntentRouter.delegateQuery(queryService, uid, sessionId, text, images, sink);
+        }
+        // P5 update 意图快路径：编辑已有物品话术走编辑管线（update.enabled 可一键停用回退原行为；
+        // 带图/express/mock 恒不路由，与查询快路径同口径）
+        if (!mock && !express && (images == null || images.isEmpty())
+                && tuningConfigService.boolOpt(org.jeecg.modules.ai.config.TuningConfigService.KEY_UPDATE_ENABLED, true)
+                && AiIntentRouter.isUpdateText(text)) {
+            return updateService.send(uid, sessionId, text, sink);
         }
         AiChatSession session = sessionService.getOwned(uid, sessionId);
         if (session == null) {
@@ -140,7 +213,7 @@ public class AiAgentService {
         String userText = StrUtil.blankToDefault(text, "（仅图片，无文字）");
         List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
         String draftState = StrUtil.blankToDefault(session.getDraftSnapshot(), "null");
-        int askBudget = (express || mock) ? 0 : Math.max(0, MAX_ASKS - nz(session.getAskCount()));
+        int askBudget = (express || mock) ? 0 : Math.max(0, maxAsks() - nz(session.getAskCount()));
         String history = recentHistory(uid, sessionId);
         String topicsJson = JSON.toJSONString(taxonomyPort.listTopics());
         String systemPrompt = prompt()
@@ -210,7 +283,7 @@ public class AiAgentService {
             session.setAskCount(nz(session.getAskCount()) + 1);
             session.setLastSummary(clip(question, 60));
             sessionService.touch(session);
-            return vo.setAskRemaining(Math.max(0, MAX_ASKS - nz(session.getAskCount())))
+            return vo.setAskRemaining(Math.max(0, maxAsks() - nz(session.getAskCount())))
                     .setSessionStatus(session.getStatus())
                     .setMessages(join(userMsg, assistantMsgs))
                     .setDraft(null);
@@ -242,7 +315,7 @@ public class AiAgentService {
             session.setDraftSnapshot(draft.toJSONString());
             session.setLastSummary(clip(reply.isEmpty() ? "草稿已生成：" + str(draft, "name") : reply, 60));
             sessionService.touch(session);
-            return vo.setAskRemaining(Math.max(0, MAX_ASKS - nz(session.getAskCount())))
+            return vo.setAskRemaining(Math.max(0, maxAsks() - nz(session.getAskCount())))
                     .setSessionStatus(session.getStatus())
                     .setMessages(join(userMsg, assistantMsgs))
                     .setDraft(draft)
@@ -255,9 +328,301 @@ public class AiAgentService {
         assistantMsgs.add(chatMsg);
         session.setLastSummary(clip(reply, 60));
         sessionService.touch(session);
-        return vo.setAskRemaining(Math.max(0, MAX_ASKS - nz(session.getAskCount())))
+        return vo.setAskRemaining(Math.max(0, maxAsks() - nz(session.getAskCount())))
                 .setSessionStatus(session.getStatus())
                 .setMessages(join(userMsg, assistantMsgs));
+    }
+
+    // ================================ P7 票据/小票 OCR 预填 ================================
+
+    /** 票据预填红线：attributes 名值对中金额类名称（命中即剥离转 manualFill） */
+    private static final Pattern RECEIPT_AMOUNT_NAME = Pattern.compile("金额|价格|实付|总价|付款|花费|消费");
+    /** 票据预填红线：attributes 名值对中时间类名称（命中即剥离转 manualFill） */
+    private static final Pattern RECEIPT_TIME_NAME = Pattern.compile("购买时间|购买日期|消费日期|消费时间|交易日期|交易时间|日期|时间");
+
+    /**
+     * 票据预填管线（P7，总方案 11 章）：小票 → 商家/购买时间/金额结构化 + 预填建档草稿。
+     * 复用带图建档多模态管线（resolveVision → receiptPrompt（P4 DB 覆盖）→ callStructured → normalizeDraft），
+     * 红线约束：金额/购买时间等 restricted 字段不预填（applyReceiptRedLine 代码级强制剥离，
+     * 仅 manualFill 手动补录提示），仅预填非 restricted 字段（商家名/备注/品牌等）。
+     * 失败降级：识别失败/非票据/无图 → 同请求内回退普通建档管线 doSend(MODE_NORMAL)，不阻塞。
+     * receipt 模式永不自动创建（无 express 语义，「预填 + 用户确认」形态）。
+     */
+    private AiChatSendVO doSendReceipt(String uid, String sessionId, String text, List<String> images,
+                                       AiStreamSink sink) {
+        AiChatSession session = sessionService.getOwned(uid, sessionId);
+        if (session == null) {
+            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        List<String> imgs = images == null ? List.of() : images.stream().limit(MAX_IMAGES).toList();
+        // 无图无从识别票据：直接回退普通建档
+        if (imgs.isEmpty()) {
+            return doSend(uid, sessionId, text, images, MODE_NORMAL, sink);
+        }
+        String userText = StrUtil.blankToDefault(text, "（仅图片，无文字）");
+
+        // 解析阶段（失败回退，不落任何消息）
+        JSONObject decision;
+        List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
+        try {
+            if (sink != null) {
+                sink.progress("vision");
+            }
+            String visionDesc = resolveVision(imgs, text);
+            String systemPrompt = receiptPrompt()
+                    .replace("{{VISION_DESCRIPTION}}", StrUtil.blankToDefault(visionDesc, "（无视觉描述）"))
+                    .replace("{{USER_CATEGORIES}}", JSON.toJSONString(categories))
+                    .replace("{{USER_TEXT}}", userText);
+            if (sink != null) {
+                sink.progress("parsing");
+            }
+            decision = callStructured(systemPrompt, userText);
+        } catch (AppException e) {
+            throw e; // 限流/排队等业务异常不降级，直接上抛（与普通管线行为一致）
+        } catch (Exception e) {
+            log.warn("[ai-agent] receipt 解析失败，回退普通建档 uid={} sessionId={}: {}", uid, sessionId, e.getMessage());
+            return doSend(uid, sessionId, text, images, MODE_NORMAL, sink);
+        }
+
+        String action = decision.getString("action");
+        String reply = StrUtil.blankToDefault(decision.getString("reply"), "");
+        JSONObject modelDraft = decision.getJSONObject("draft");
+        JSONObject receipt = decision.getJSONObject("receipt");
+        // 非票据 / 未出草稿 / 草稿无名 → 降级普通建档（前端无感，不阻塞）
+        if (!"draft".equals(action) || modelDraft == null || StrUtil.isBlank(str(modelDraft, "name"))) {
+            log.info("[ai-agent] receipt 未识别为票据，回退普通建档 uid={} sessionId={}", uid, sessionId);
+            return doSend(uid, sessionId, text, images, MODE_NORMAL, sink);
+        }
+
+        // 规范化 + 票据红线剥离（失败同样回退，不落脏消息）
+        JSONObject draft;
+        try {
+            draft = normalizeDraft(modelDraft, categories, imgs, userText);
+            applyReceiptRedLine(draft, receipt);
+            itemTools.injectCoverImage(draft, imgs);
+        } catch (Exception e) {
+            log.warn("[ai-agent] receipt 草稿组装失败，回退普通建档 uid={} sessionId={}: {}", uid, sessionId, e.getMessage());
+            return doSend(uid, sessionId, text, images, MODE_NORMAL, sink);
+        }
+        int overall = overallOf(draft);
+
+        // 限流：SSE 通道已由端点前置获取，此处仅旧一次性 POST 路径执行（与普通管线同口径，防双重计数）
+        if (sink == null) {
+            String limitError = rateLimiter.tryAcquireChat(uid);
+            if (limitError != null) {
+                throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR, limitError);
+            }
+        }
+
+        // 消息落库（解析先于落库：降级路径不留脏消息）
+        AiChatMessage userMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_USER,
+                AiChatMessage.TYPE_TEXT, StrUtil.nullToEmpty(text), imgs, null, null, null, sink);
+        AiChatMessage draftMsg = appendMessage(uid, sessionId, AiChatMessage.ROLE_ASSISTANT,
+                AiChatMessage.TYPE_DRAFT, reply, null, null, draft.toJSONString(), overall, sink);
+        if ("新对话".equals(session.getTitle()) && StrUtil.isNotBlank(str(draft, "name"))) {
+            session.setTitle(clip(str(draft, "name"), 20));
+        }
+        session.setDraftSnapshot(draft.toJSONString());
+        session.setLastSummary(clip(reply.isEmpty() ? "草稿已生成：" + str(draft, "name") : reply, 60));
+        sessionService.touch(session);
+        return new AiChatSendVO().setSessionId(sessionId)
+                .setSessionStatus(session.getStatus())
+                .setAskRemaining(Math.max(0, maxAsks() - nz(session.getAskCount())))
+                .setMessages(join(userMsg, List.of(draftMsg)))
+                .setDraft(draft)
+                .setOverallConfidence(overall)
+                .setReceipt(receipt);
+    }
+
+    /**
+     * P7 票据预填红线（代码级强制，不信任模型自觉）：金额/购买时间等 restricted 字段不预填——
+     * fields[] 中 element 6 价格 / 5 购入时间 剥离，attributes[] 中金额/时间类名值对剥离，
+     * 转 manualFill「请手动补录」提示（识别值仅作小票参考文本，不落任何字段）。
+     * LOCKED_RESTRICTED（17/18/21/22/25/26/33）由既有 sanitizeFields 兜底； restricted 语义详见 AiComponentCatalog。
+     */
+    private void applyReceiptRedLine(JSONObject draft, JSONObject receipt) {
+        java.util.LinkedHashSet<String> manualSet = new java.util.LinkedHashSet<>();
+        JSONArray manual = draft.getJSONArray("manualFill");
+        if (manual != null) {
+            for (int i = 0; i < manual.size(); i++) {
+                String s = manual.getString(i);
+                if (StrUtil.isNotBlank(s)) {
+                    manualSet.add(s.trim());
+                }
+            }
+        }
+        // 票据预填恒提示金额/购买时间手动补录（红线：两字段不预填，无论是否识别到值）；
+        // 识别参考值优先 receipt 结构块，缺失时回退被剥离字段值（仅作提示文本，不落字段）
+        boolean hadAmount = true;
+        boolean hadTime = true;
+        // 模型若已给出同类提示，统一替换为编排器口径（带参考值版本），防重复
+        manualSet.removeIf(s -> s.startsWith("金额"));
+        manualSet.removeIf(s -> s.startsWith("购买时间"));
+        String amountRef = receipt == null ? null : tidyNumber(receipt.get("amount"));
+        String timeRef = receipt == null ? null : StrUtil.trimToNull(receipt.getString("purchase_time"));
+        JSONArray fields = draft.getJSONArray("fields");
+        if (fields != null && !fields.isEmpty()) {
+            JSONArray kept = new JSONArray();
+            for (int i = 0; i < fields.size(); i++) {
+                JSONObject f = fields.getJSONObject(i);
+                if (f == null) {
+                    continue;
+                }
+                Integer element = f.getInteger("element");
+                if (Integer.valueOf(6).equals(element)) {
+                    hadAmount = true;
+                    if (amountRef == null) {
+                        amountRef = tidyNumber(f.get("value"));
+                    }
+                    continue;
+                }
+                if (Integer.valueOf(5).equals(element)) {
+                    hadTime = true;
+                    if (timeRef == null) {
+                        timeRef = StrUtil.trimToNull(String.valueOf(f.get("value")));
+                    }
+                    continue;
+                }
+                kept.add(f);
+            }
+            draft.put("fields", kept);
+        }
+        JSONArray attributes = draft.getJSONArray("attributes");
+        if (attributes != null && !attributes.isEmpty()) {
+            JSONArray keptAttrs = new JSONArray();
+            for (int i = 0; i < attributes.size(); i++) {
+                JSONObject p = attributes.getJSONObject(i);
+                String name = p == null ? null : StrUtil.trimToNull(p.getString("name"));
+                if (name == null) {
+                    continue;
+                }
+                if (RECEIPT_AMOUNT_NAME.matcher(name).find()) {
+                    hadAmount = true;
+                    if (amountRef == null) {
+                        amountRef = StrUtil.trimToNull(String.valueOf(p.get("value")));
+                    }
+                    continue;
+                }
+                if (RECEIPT_TIME_NAME.matcher(name).find()) {
+                    hadTime = true;
+                    if (timeRef == null) {
+                        timeRef = StrUtil.trimToNull(String.valueOf(p.get("value")));
+                    }
+                    continue;
+                }
+                keptAttrs.add(p);
+            }
+            draft.put("attributes", keptAttrs);
+        }
+        if (hadAmount) {
+            manualSet.add(amountRef != null
+                    ? "金额请手动补录（小票参考：¥" + amountRef + "）" : "金额请手动补录");
+        }
+        if (hadTime) {
+            manualSet.add(timeRef != null
+                    ? "购买时间请手动补录（小票参考：" + timeRef + "）" : "购买时间请手动补录");
+        }
+        if (!manualSet.isEmpty()) {
+            draft.put("manualFill", new JSONArray(new ArrayList<>(manualSet)));
+        }
+    }
+
+    /** 数字规整展示（89.0 → 89；非数字原样返回） */
+    private String tidyNumber(Object v) {
+        if (v == null) {
+            return null;
+        }
+        String s = StrUtil.trimToNull(String.valueOf(v));
+        if (s == null) {
+            return null;
+        }
+        try {
+            return new java.math.BigDecimal(s).stripTrailingZeros().toPlainString();
+        } catch (NumberFormatException e) {
+            return s;
+        }
+    }
+
+    /** 票据预填技能包提示词：P4 调优模式延伸，DB enabled 配置优先于内置文件 */
+    private String receiptPrompt() {
+        return tuningConfigService.receiptPrompt(builtinReceiptPrompt());
+    }
+
+    /** 内置票据预填技能包懒加载（双检锁单例缓存） */
+    private String builtinReceiptPrompt() {
+        if (receiptPromptTemplate == null) {
+            synchronized (this) {
+                if (receiptPromptTemplate == null) {
+                    try (InputStream in = getClass().getClassLoader()
+                            .getResourceAsStream("skills/mustard-receipt-prefill/system_prompt.md")) {
+                        if (in == null) {
+                            throw new IllegalStateException("技能包缺失：skills/mustard-receipt-prefill/system_prompt.md");
+                        }
+                        receiptPromptTemplate = IoUtil.read(in, StandardCharsets.UTF_8);
+                    } catch (Exception e) {
+                        throw new IllegalStateException("票据预填技能包加载失败", e);
+                    }
+                }
+            }
+        }
+        return receiptPromptTemplate;
+    }
+
+    // ================================ P6 建档解析服务（MCP parse_item_draft 内核） ================================
+
+    /**
+     * 建档解析服务（P6 能力开放，总方案 11 章：建档类以「解析服务」形态开放，不在工具内直接落库）：
+     * 外部 AI agent 经 MCP parse_item_draft 调用。复用建档解析全链（vision → filingPrompt（P4 DB 覆盖）
+     * → 结构化调用 → normalizeDraft/sanitize/injectCoverImage），但不落会话/消息/草稿快照——
+     * 创建动作由调用方拿 attributes + confidence 走开放平台 add 接口二次确认（confidence≥85 直接入库，
+     * <85 转草稿态由用户在 App 确认）。红线继承：draft 已过 sanitizeFields（restricted→manualFill）
+     * 与 ensureSensitiveHint（原文敏感词兜底），attributes 经 buildAttributes 兜底丢弃 restricted。
+     *
+     * @return {action, reply, draft（normalize 后草稿卡，chat/未解析时 null）, confidence（有草稿时）}
+     */
+    public JSONObject parseDraft(String uid, String text, List<String> images) {
+        if (StrUtil.isBlank(text) && (images == null || images.isEmpty())) {
+            throw new AppException(AiErrorEnum.REQUEST_PARAM_ERROR);
+        }
+        semaphore.beginRequest();
+        boolean acquired = false;
+        try {
+            acquired = semaphore.tryAcquire(org.jeecg.modules.ai.adapter.AiGlobalSemaphore.SEM_CONV, convMax, 0);
+            if (!acquired) {
+                throw new AppException(AiErrorEnum.QUEUE_TIMEOUT);
+            }
+            List<String> imgs = images == null ? List.of() : images.stream().limit(MAX_IMAGES).toList();
+            String visionDesc = resolveVision(imgs, text);
+            String userText = StrUtil.blankToDefault(text, "（仅图片，无文字）");
+            List<AiCategoryRef> categories = taxonomyPort.listUnifiedCategories(uid);
+            String systemPrompt = prompt()
+                    .replace("{{VISION_DESCRIPTION}}", StrUtil.blankToDefault(visionDesc, "（无视觉描述：无图片或口述模式）"))
+                    .replace("{{HISTORY}}", "（无历史）")
+                    .replace("{{ASK_BUDGET}}", "0")
+                    .replace("{{USER_CATEGORIES}}", JSON.toJSONString(categories))
+                    .replace("{{USER_TOPICS}}", JSON.toJSONString(taxonomyPort.listTopics()))
+                    .replace("{{MODE}}", MODE_NORMAL)
+                    .replace("{{DRAFT_STATE}}", "null")
+                    .replace("{{USER_TEXT}}", userText);
+            JSONObject decision = callStructured(systemPrompt, userText);
+            JSONObject modelDraft = decision.getJSONObject("draft");
+            if (modelDraft != null && !"chat".equals(decision.getString("action"))) {
+                JSONObject draft = normalizeDraft(modelDraft, categories, imgs, userText);
+                if (!imgs.isEmpty()) {
+                    itemTools.injectCoverImage(draft, imgs);
+                }
+                decision.put("draft", draft);
+                decision.put("confidence", overallOf(draft));
+            } else {
+                decision.put("draft", null);
+            }
+            return decision;
+        } finally {
+            if (acquired) {
+                semaphore.release(org.jeecg.modules.ai.adapter.AiGlobalSemaphore.SEM_CONV);
+            }
+            semaphore.endRequest();
+        }
     }
 
     // ================================ express 直接建档（方案 4.2） ================================
@@ -975,6 +1340,12 @@ public class AiAgentService {
     }
 
     private String prompt() {
+        // P4：DB enabled 配置优先于内置技能包文件（无 DB 配置/异常时走内置，行为不变）
+        return tuningConfigService.filingPrompt(builtinPrompt());
+    }
+
+    /** 内置技能包懒加载（保留双检锁单例缓存） */
+    private String builtinPrompt() {
         if (promptTemplate == null) {
             synchronized (this) {
                 if (promptTemplate == null) {

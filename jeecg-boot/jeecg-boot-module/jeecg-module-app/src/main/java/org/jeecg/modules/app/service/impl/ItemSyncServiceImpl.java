@@ -66,6 +66,10 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Autowired
     LineageService lineageService;
 
+    @Lazy
+    @Autowired
+    org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService;
+
     /** D1 流转要约锁（@Lazy 打破与 ItemFlowService→IItemSyncService 的循环引用） */
     @Lazy
     @Autowired
@@ -357,6 +361,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
             appendDestroyLineage(itemSyncExist, newVersion, null,
                     toRecycle ? MipEventType.RECYCLE : MipEventType.RUINS_DROP);
         }
+        // 检索索引同步删除（同步行已置 DESTROYED，rebuild 判无有效行即删索引行）
+        searchIndexService.rebuild(itemSyncExist.getItemId());
         return result;
     }
 
@@ -396,6 +402,7 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     private void appendDestroyLineage(ItemSync itemSyncExist, Integer version, Integer qty, MipEventType type) {
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(itemSyncExist.getOriId())
+                .setItemId(itemSyncExist.getItemId())
                 .setEventType(type.getCode())
                 .setFromUid(LineageService.hashUid(itemSyncExist.getUserId()))
                 .setOperator(LineageService.OPERATOR_USER)

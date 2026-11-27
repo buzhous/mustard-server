@@ -58,6 +58,9 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
     @Autowired
     private LineageService lineageService;
 
+    @Autowired
+    private org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService;
+
     @Override
     public boolean dropToRecycle(ItemSync itemSync) {
         ItemRecycle recycle = BeanUtil.copyProperties(itemSync, ItemRecycle.class);
@@ -137,7 +140,10 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
         restored.setId(recycle.getId());
         restored.setStatus(STATUS_RESTORED);
         restored.setUpdateTime(DateUtil.date());
-        return this.updateById(restored);
+        boolean restoredOk = this.updateById(restored);
+        // 检索索引快照恢复重建（同步行已复原）
+        searchIndexService.rebuild(recycle.getItemId());
+        return restoredOk;
     }
 
     @Override
@@ -160,6 +166,8 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
                 .eq(ItemSync::getStatus, SyncStatusEnum.DESTROYED.getCode()));
         // MIP 流转账本：彻底删除（账本终止事件；幂等键=回收站记录）
         appendPurgeLineage(recycle, LineageService.OPERATOR_USER);
+        // 检索索引同步删除（DESTROYED 同步行已物理清除）
+        searchIndexService.rebuild(recycle.getItemId());
         return true;
     }
 
@@ -179,6 +187,8 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
                     .eq(ItemSync::getStatus, SyncStatusEnum.DESTROYED.getCode()));
             // MIP 流转账本：用户主动清空同样为 destroy 终止事件（operator=user）
             appendPurgeLineage(recycle, LineageService.OPERATOR_USER);
+            // 检索索引同步删除
+            searchIndexService.rebuild(recycle.getItemId());
             count++;
         }
         return count;
@@ -201,6 +211,8 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
                     .eq(ItemSync::getStatus, SyncStatusEnum.DESTROYED.getCode()));
             // MIP 流转账本：超期自动清除同样为 destroy 终止事件（operator=system）
             appendPurgeLineage(recycle, LineageService.OPERATOR_SYSTEM);
+            // 检索索引同步删除
+            searchIndexService.rebuild(recycle.getItemId());
             count++;
         }
         return count;
@@ -212,6 +224,7 @@ public class ItemRecycleServiceImpl extends ServiceImpl<ItemRecycleMapper, ItemR
     private void appendPurgeLineage(ItemRecycle recycle, String operator) {
         lineageService.append(new org.jeecg.modules.app.entity.ItemLineage()
                 .setOriId(recycle.getOriId())
+                .setItemId(recycle.getItemId())
                 .setEventType(MipEventType.DESTROY.getCode())
                 .setFromUid(LineageService.hashUid(recycle.getUserId()))
                 .setOperator(operator)
