@@ -2,7 +2,7 @@
   <div class="field-config-editor">
     <div class="fce-header">
       <span class="fce-title">物品字段配置</span>
-      <span class="fce-tip">名称、图标、类别为必填三要素，不可移除；主题类型由字段配置自动推导</span>
+      <span class="fce-tip">图标(1)、名称(2)、类别(3) 为必填三要素，不可移除；字段来源为基础配置 &gt; 字段管理字典，主题类型由字段配置自动推导</span>
     </div>
     <div class="fce-toolbar">
       <a-select
@@ -60,7 +60,9 @@
 </template>
 
 <script lang="ts" setup>
-  import { ref, watch, computed } from 'vue';
+  import { ref, watch, computed, onMounted } from 'vue';
+  import { useMessage } from '/@/hooks/web/useMessage';
+  import { getFieldElementOptions, FieldElementOption } from '/@/api/base/fieldElementApi';
 
   interface RowItem {
     element: number;
@@ -77,29 +79,17 @@
 
   const emit = defineEmits(['update:value', 'type-change']);
 
-  /** 20 种组件类型，与后端字段规范（Apifox《物品数据结构》组件列表）一致 */
-  const ELEMENT_OPTIONS = [
-    { element: 1, label: '名称', name: 'name' },
-    { element: 2, label: '图标', name: 'icon' },
-    { element: 3, label: '类别', name: 'category' },
-    { element: 4, label: '等级', name: 'level' },
-    { element: 5, label: '购入时间', name: 'purchaseTime' },
-    { element: 6, label: '价格', name: 'price' },
-    { element: 7, label: '数量', name: 'quantity' },
-    { element: 8, label: '描述', name: 'description' },
-    { element: 9, label: '特殊描述', name: 'specialDescription' },
-    { element: 10, label: '标签组', name: 'tags' },
-    { element: 11, label: '属性组', name: 'attributes' },
-    { element: 12, label: '图片', name: 'images' },
-    { element: 13, label: '视频', name: 'videos' },
-    { element: 14, label: '文图视附件', name: 'mixMedia' },
-    { element: 15, label: '附件', name: 'attachments' },
-    { element: 16, label: '电子书', name: 'ebook' },
-    { element: 17, label: '密码', name: 'password' },
-    { element: 18, label: '定位', name: 'location' },
-    { element: 19, label: '富文本', name: 'richText' },
-    { element: 20, label: '3D模型', name: 'model3d' },
-  ];
+  /** 字段字典选项：来自基础配置 > 字段管理（/admin/fieldElement/list），挂载时动态加载 */
+  const dictOptions = ref<FieldElementOption[]>([]);
+  const { createMessage } = useMessage();
+
+  onMounted(async () => {
+    try {
+      dictOptions.value = await getFieldElementOptions();
+    } catch (e) {
+      createMessage.error('字段字典加载失败，请刷新重试');
+    }
+  });
 
   const REQUIRED_ELEMENTS = [1, 2, 3];
 
@@ -108,13 +98,16 @@
   let lastEmitted = '';
 
   const isRequiredElement = (element: number) => REQUIRED_ELEMENTS.includes(element);
-  const elementLabel = (element: number) => ELEMENT_OPTIONS.find((item) => item.element === element)?.label || `组件${element}`;
+  const elementLabel = (element: number) =>
+    dictOptions.value.find((item) => item.element === element)?.name || `组件${element}`;
 
   const addableOptions = computed(() =>
-    ELEMENT_OPTIONS.filter((item) => !rows.value.some((row) => row.element === item.element)).map((item) => ({
-      label: item.label,
-      value: item.element,
-    })),
+    dictOptions.value
+      .filter((item) => item.status === 1 && !rows.value.some((row) => row.element === item.element))
+      .map((item) => ({
+        label: `${item.name}（${item.element}）`,
+        value: item.element,
+      })),
   );
 
   const derivedType = computed(() => {
@@ -128,7 +121,7 @@
   const derivedTypeLabel = computed(() => ({ 1: '基础型', 2: '多媒体型', 3: '模型型', 4: '扩展型' }[derivedType.value] || '未知'));
 
   function createRow(element: number, name?: string, isShow = true, attributesText = '', contentText = ''): RowItem {
-    const meta = ELEMENT_OPTIONS.find((item) => item.element === element);
+    const meta = dictOptions.value.find((item) => item.element === element);
     return {
       element,
       name: name ?? meta?.name ?? '',
@@ -240,7 +233,7 @@
   /** 校验：组件属性/组件内容必须为合法 JSON 对象；返回错误信息，null 表示通过 */
   function validate(): string | null {
     if (rows.value.length === 0) {
-      return '字段配置不能为空，必须包含：名称(1)、图标(2)、类别(3)';
+      return '字段配置不能为空，必须包含：图标(1)、名称(2)、类别(3)';
     }
     for (const row of rows.value) {
       if (isRequiredElement(row.element) && (!row.name || !row.name.trim())) {

@@ -28,7 +28,7 @@ public final class MipProfileSupport {
 
     /** element → [语义, value类型, 默认sensitivity]（与 MipComponentRegistry 同源） */
     private static final Object[][] COMPONENTS = {
-            {1, "名称", "string", "public"}, {2, "图标", "url", "public"},
+            {1, "图标", "url", "public"}, {2, "名称", "string", "public"},
             {3, "类别", "int", "public"}, {4, "等级", "int", "public"},
             {5, "购入时间", "date", "private"}, {6, "价格", "number", "private"},
             {7, "数量", "int", "private"}, {8, "描述", "string", "public"},

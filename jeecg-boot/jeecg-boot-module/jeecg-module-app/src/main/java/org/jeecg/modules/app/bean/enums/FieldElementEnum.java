@@ -6,8 +6,8 @@ package org.jeecg.modules.app.bean.enums;
  */
 public enum FieldElementEnum {
 
-    name(1, "名称"),
-    icon(2, "图标"),
+    icon(1, "图标"),
+    name(2, "名称"),
     category(3, "类别"),
     level(4, "等级"),
     purchaseTime(5, "购入时间"),

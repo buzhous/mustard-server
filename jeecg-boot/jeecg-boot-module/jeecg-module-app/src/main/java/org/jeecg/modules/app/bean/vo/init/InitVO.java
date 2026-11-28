@@ -34,4 +34,7 @@ public class InitVO implements Serializable {
     @Schema(description = "是否更新侧栏标签", example = "0")
     private Integer isRefreshTag;
 
+    @Schema(description = "字段字典版本号（App 与本地缓存比对，不一致则按端拉取 /app/base/fields）", example = "1730000000000")
+    private Long fieldVersion;
+
 }

@@ -45,7 +45,7 @@ public class ItemSearchIndexService {
     /** restricted 兜底清单：组件缺失 sensitivity 键时按绝对受限处理（MipComponentRegistry.LOCKED_RESTRICTED 同步） */
     private static final Set<Integer> RESTRICTED_FALLBACK = Set.of(17, 18, 21, 22, 25, 26, 33);
 
-    /** 不进 attrText 的组件：名称(1)/图标(2)/标签组(10) 单列承载，图标 URL 非检索文本 */
+    /** 不进 attrText 的组件：图标(1)/名称(2)/标签组(10) 单列承载，图标 URL 非检索文本 */
     private static final Set<Integer> ATTR_TEXT_SKIP = Set.of(1, 2, 10);
 
     private final ItemSearchIndexMapper searchIndexMapper;

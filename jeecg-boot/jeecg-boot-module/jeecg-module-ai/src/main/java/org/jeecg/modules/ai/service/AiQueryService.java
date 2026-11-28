@@ -75,7 +75,7 @@ public class AiQueryService {
     private static final int MAX_DETAIL_PROPS = 10;
     /** 排序字段白名单 */
     private static final List<String> ORDER_BY_WHITELIST = List.of("created", "name", "price", "quantity", "status");
-    /** 详情卡元素注入上限（1名称/2图标/3类别/11属性组/12图片等大对象不在属性摘要中展开） */
+    /** 详情卡元素注入上限（1图标/2名称/3类别/11属性组/12图片等大对象不在属性摘要中展开） */
     private static final Set<Integer> DETAIL_PROP_EXCLUDE = Set.of(1, 2, 3, 12, 13, 14, 15, 16, 19, 20);
     /** 状态码 → 展示名（0临时 1正常 2使用中） */
     private static final Map<Integer, String> STATUS_LABELS = Map.of(0, "临时", 1, "正常", 2, "使用中");

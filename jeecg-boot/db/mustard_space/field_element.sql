@@ -1,0 +1,4 @@
+-- 字段字典基础模块（物品管理重构 v2.5 · 需求1）
+-- 本文件为 V3.9.7_4__mustard_field_element.sql 的存档副本（flyway 自动执行，无需手工跑）
+-- 内容见：jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/V3.9.7_4__mustard_field_element.sql
+-- 含：tbl_field_element 建表 + 34 条字典种子 + 「基础配置」菜单（字段管理 + 系统分类）

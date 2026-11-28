@@ -27,6 +27,9 @@ public class AppInitServiceImpl extends ServiceImpl<AppUserMapper, AppUser> impl
     @Autowired
     private IUserLoginDeviceService iUserLoginDeviceService;
 
+    @Autowired
+    private IBaseFieldService iBaseFieldService;
+
 
     private UserAmount queryOrCreateUserAmount(AppUser loginUser) {
         // 初始化资金账户 START ///
@@ -90,6 +93,8 @@ public class AppInitServiceImpl extends ServiceImpl<AppUserMapper, AppUser> impl
         // 初始化配置登录设备信息
         UserLoginDevice loginDevice = queryOrCreateLoginDevice(loginUser, deviceId);
 
+        // 字段字典版本号（App 比对本地缓存决定是否按端拉取 /app/base/fields；读缓存，Redis 异常降级 DB）
+        initVO.setFieldVersion(iBaseFieldService.getVersion());
 
         return initVO;
     }

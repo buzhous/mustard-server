@@ -47,8 +47,8 @@ public final class MipComponentRegistry {
     static {
         Map<Integer, Component> m = new LinkedHashMap<>();
         // ===== 通用组件 1-22（对齐 TopicFieldClassifier 与 MIP 协议 3.1）=====
-        m.put(1, new Component(1, "名称", "string", SENS_PUBLIC, FORM_GENERAL));
-        m.put(2, new Component(2, "图标", "url", SENS_PUBLIC, FORM_GENERAL));
+        m.put(1, new Component(1, "图标", "url", SENS_PUBLIC, FORM_GENERAL));
+        m.put(2, new Component(2, "名称", "string", SENS_PUBLIC, FORM_GENERAL));
         m.put(3, new Component(3, "类别", "int", SENS_PUBLIC, FORM_GENERAL));
         m.put(4, new Component(4, "等级", "int", SENS_PUBLIC, FORM_GENERAL));
         m.put(5, new Component(5, "购入时间", "date", SENS_PRIVATE, FORM_GENERAL));

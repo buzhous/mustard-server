@@ -84,14 +84,14 @@ public class AppOpenMcpController {
                     "text", Map.of("type", "string", "description", "物品的自然语言描述（必填）"),
                     "image_url", Map.of("type", "string", "description", "可选：物品图片 URL（http/https），辅助识别")),
                     List.of("text")),
-            tool("add_item", "为用户新增物品。attributes 必填组件：1 名称 / 2 图标(合法URL) / 3 类别；sensitivity 由服务端单点计算，请求方传入无效。confidence>=85 直接入库，否则草稿确认态（App 端会弹确认）。", Map.of(
+            tool("add_item", "为用户新增物品。attributes 必填组件：1 图标(合法URL) / 2 名称 / 3 类别；sensitivity 由服务端单点计算，请求方传入无效。confidence>=85 直接入库，否则草稿确认态（App 端会弹确认）。", Map.of(
                     "attributes", Map.of(
                             "type", "array",
                             "description", "物品属性数组 [{element,value}]",
                             "items", Map.of(
                                     "type", "object",
                                     "properties", Map.of(
-                                            "element", Map.of("type", "integer", "description", "组件编号，如 1=名称 2=图标 3=类别 7=数量"),
+                                            "element", Map.of("type", "integer", "description", "组件编号，如 1=图标 2=名称 3=类别 7=数量"),
                                             "value", Map.of("description", "组件值，类型随组件而定")),
                                     "required", List.of("element", "value"))),
                     "confidence", Map.of("type", "number", "description", "解析置信度 0-100，≥85 直接入库，否则草稿"),
@@ -106,7 +106,7 @@ public class AppOpenMcpController {
                             "items", Map.of(
                                     "type", "object",
                                     "properties", Map.of(
-                                            "element", Map.of("type", "integer", "description", "组件编号，如 1=名称 2=图标 3=类别 7=数量"),
+                                            "element", Map.of("type", "integer", "description", "组件编号，如 1=图标 2=名称 3=类别 7=数量"),
                                             "value", Map.of("description", "组件值，类型随组件而定")),
                                     "required", List.of("element", "value"))),
                     "confidence", Map.of("type", "number", "description", "解析置信度 0-100，≥85 恢复正常态，<85 转草稿；不传保持原状态"),

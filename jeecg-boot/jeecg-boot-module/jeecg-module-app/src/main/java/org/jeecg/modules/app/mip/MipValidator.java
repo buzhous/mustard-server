@@ -111,7 +111,7 @@ public final class MipValidator {
         }
         for (int r : REQUIRED) {
             if (!elements.contains(r)) {
-                return "字段配置必须包含：名称(1)、图标(2)、类别(3)";
+                return "字段配置必须包含：图标(1)、名称(2)、类别(3)";
             }
         }
         return null;

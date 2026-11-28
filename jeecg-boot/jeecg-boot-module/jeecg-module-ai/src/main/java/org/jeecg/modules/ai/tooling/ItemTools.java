@@ -52,20 +52,20 @@ public class ItemTools {
 
     /**
      * 草稿 → 开放接口 attributes 组装：
-     * 顶层槽位 1名称/2图标/3类别/8描述/10标签组/11属性组 + fields[] 任意组件直传。
+     * 顶层槽位 1图标/2名称/3类别/8描述/10标签组/11属性组 + fields[] 任意组件直传。
      * restricted / 未知 element / 超限条目一律丢弃（编排器已过滤，此处兜底）。
      */
     public String buildAttributes(JSONObject draft) {
         JSONArray attributes = new JSONArray();
-        attributes.add(attr(1, str(draft, "name")));
+        attributes.add(attr(2, str(draft, "name")));
         JSONObject icon = draft.getJSONObject("icon");
         String iconValue = icon == null ? null : StrUtil.trimToNull(icon.getString("value"));
         // URL → 封面图；合法 iconpark 图标名（mock 模拟建档提名）→ 原样落库，App 端按图标名渲染、
         // 识别失败自动回退本地占位；其余非法值不填充占位域名
         if (iconValue != null && (iconValue.startsWith("http://") || iconValue.startsWith("https://"))) {
-            attributes.add(attr(2, iconValue));
+            attributes.add(attr(1, iconValue));
         } else if (iconValue != null && ICON_KEY_PATTERN.matcher(iconValue).matches()) {
-            attributes.add(attr(2, iconValue));
+            attributes.add(attr(1, iconValue));
         }
         attributes.add(attr(3, str(draft, "category")));
         String desc = str(draft, "description");
