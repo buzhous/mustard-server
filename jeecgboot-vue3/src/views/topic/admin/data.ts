@@ -148,21 +148,6 @@ export const formSchema: FormSchema[] = [
     helpMessage: '展示在添加列表主题卡片背景，建议竖版图片',
   },
   {
-    field: 'topicCate',
-    label: '主题分类',
-    component: 'ApiSelect',
-    required: true,
-    helpMessage: '采用系统分类（C3 分类治理），支持名称/说明/ID 搜索过滤；停用分类置灰',
-    componentProps: {
-      api: getSystemCategoryOptions,
-      labelField: 'name',
-      valueField: 'id',
-      placeholder: '输入分类名称/说明搜索系统分类',
-      allowClear: true,
-      filterOption: filterCateOption,
-    },
-  },
-  {
     field: 'itemCate',
     label: '物品分类',
     component: 'ApiSelect',

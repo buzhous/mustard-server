@@ -62,9 +62,6 @@ public class TopicAdmin implements Serializable {
     @Schema(description = "主题描述")
     private String topicDesc;
 
-    @Schema(description = "主题分类")
-    private String topicCate;
-
     @Schema(description = "主题状态(0启用 1停用)")
     private Integer topicStatus;
 
