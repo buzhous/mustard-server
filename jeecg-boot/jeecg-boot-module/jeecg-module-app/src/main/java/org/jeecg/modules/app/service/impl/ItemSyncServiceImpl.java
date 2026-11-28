@@ -70,6 +70,11 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
     @Autowired
     org.jeecg.modules.app.service.ItemSearchIndexService searchIndexService;
 
+    /** 查询意图缓存（P4）：App 侧写路径成功后按 uid 失效（口径同 AiItemPortImpl 写失效） */
+    @Lazy
+    @Autowired
+    private org.jeecg.modules.ai.service.AiQueryCacheService queryCacheService;
+
     /** D1 流转要约锁（@Lazy 打破与 ItemFlowService→IItemSyncService 的循环引用） */
     @Lazy
     @Autowired
@@ -286,6 +291,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
 
             syncReqVO.setSyncStatus(SyncStatusEnum.SUCCESS.getCode());
             syncReqVO.setVersion(newVersion);
+            // 意图缓存写失效（P4）：App 上传成功即失效该 uid 全部查询缓存
+            queryCacheService.evictUid(itemSyncExist.getUserId());
         }
 
         return result;
@@ -315,6 +322,8 @@ public class ItemSyncServiceImpl extends ServiceImpl<ItemSyncMapper, ItemSync> i
         if (isItemLocked(itemSyncExist.getItemId())) {
             throw new AppException(ExceptionEnum.ITEM_IN_TRANSIT);
         }
+        // 意图缓存写失效（P4）：销毁/删除/扣减均使该 uid 查询缓存失效（提前失效无害，仅多一次缓存重建）
+        queryCacheService.evictUid(syncVO.getUserId());
         // 流转要约锁定期：不可销毁/删除/投放殷墟（要约失效/拒绝/撤回/确认后解锁）
         if (itemFlowService.locked(itemSyncExist.getItemId())) {
             throw new AppException(ExceptionEnum.ITEM_FLOW_OFFERED);

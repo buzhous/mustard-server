@@ -55,8 +55,8 @@ public final class MipWriteSupport {
                     }
                     String strValue = String.valueOf(value);
                     switch (element) {
-                        case 1 -> name = strValue;
-                        case 2 -> icon = strValue;
+                        case 1 -> icon = strValue;
+                        case 2 -> name = strValue;
                         case 3 -> category = strValue;
                         case 4 -> {
                             try {

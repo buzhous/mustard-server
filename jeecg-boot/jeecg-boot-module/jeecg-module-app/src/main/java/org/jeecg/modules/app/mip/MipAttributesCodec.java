@@ -126,8 +126,13 @@ public final class MipAttributesCodec {
         return switch (type) {
             case "string" -> firstNonNull(content, "text", "name", "value", "password");
             case "html" -> firstNonNull(content, "rich", "text");
-            case "url" -> firstNonNull(content, "url", "path");
-            case "int" -> firstNonNull(content, element == 4 ? "level" : "value", "text");
+            case "url" -> firstNonNull(content, "url", "path", "value");
+            case "int" -> {
+                if (element == 3) {   // 类别 {id,name}：以 id 为准（identity 列存分类 id），无 id 回退 name
+                    yield firstNonNull(content, "id", "name", "value");
+                }
+                yield firstNonNull(content, element == 4 ? "level" : "value", "text");
+            }
             case "number" -> firstNonNull(content, "price", "text");
             case "date" -> firstNonNull(content, "date", "text");
             case "daterange" -> firstNonNull(content, "date", "text", "value");

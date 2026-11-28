@@ -64,12 +64,13 @@ public final class MipValidator {
         }
         // 实例级必填已放开（attributes 非必填项，组件缺失不阻断；名称/类别语义由调用方前置把关）
         // 冗余一致性：identity 与组件 1/2/3/4 对齐（E-SYNC 以组件值为准自动回写）
+        // 组件编号：1=图标 2=名称（MipComponentRegistry 3.1）
         if (identity != null) {
-            if (!Objects.equals(identity.getString("name"), attrStringValue(attributes, 1))) {
-                errs.add("E-SYNC|identity.name 与组件 1 不一致");
+            if (!Objects.equals(identity.getString("name"), attrStringValue(attributes, 2))) {
+                errs.add("E-SYNC|identity.name 与组件 2 不一致");
             }
-            if (!Objects.equals(identity.getString("icon"), attrStringValue(attributes, 2))) {
-                errs.add("E-SYNC|identity.icon 与组件 2 不一致");
+            if (!Objects.equals(identity.getString("icon"), attrStringValue(attributes, 1))) {
+                errs.add("E-SYNC|identity.icon 与组件 1 不一致");
             }
         }
         return errs;
